@@ -37,23 +37,27 @@ export async function getSignedInUser() {
   return data.user ?? null;
 }
 
-export async function createAccount({ displayName, email, password }) {
+export async function createAccount({ displayName, email, password, captchaToken }) {
   return requireClient().auth.signUp({
     email,
     password,
     options: {
       data: { display_name: displayName },
       emailRedirectTo: window.location.origin,
+      ...(captchaToken ? { captchaToken } : {}),
     },
   });
 }
 
-export async function signIn({ email, password }) {
-  return requireClient().auth.signInWithPassword({ email, password });
+export async function signIn({ email, password, captchaToken }) {
+  return requireClient().auth.signInWithPassword({ email, password, options: captchaToken ? { captchaToken } : {} });
 }
 
-export async function sendPasswordReset(email) {
-  return requireClient().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+export async function sendPasswordReset(email, captchaToken) {
+  return requireClient().auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+    ...(captchaToken ? { captchaToken } : {}),
+  });
 }
 
 export async function updatePassword(password) {
@@ -69,21 +73,34 @@ export async function signOut() {
 
 export async function loadReadingData(userId) {
   const client = requireClient();
-  const [profileResult, feedbackResult] = await Promise.all([
+  const [profileResult, feedbackResult, contactResult] = await Promise.all([
     client.from("reading_profiles").select("*").eq("user_id", userId).maybeSingle(),
     client.from("book_feedback").select("book_id,status").eq("user_id", userId),
+    client.from("reader_contact_profiles").select("*").eq("user_id", userId).maybeSingle(),
   ]);
   if (profileResult.error) throw profileResult.error;
   if (feedbackResult.error) throw feedbackResult.error;
+  if (contactResult.error) throw contactResult.error;
   return {
     profile: profileResult.data,
     feedback: feedbackResult.data ?? [],
+    contactProfile: contactResult.data,
   };
 }
 
 export async function saveReadingProfile(profile) {
   const { data, error } = await requireClient()
     .from("reading_profiles")
+    .upsert(profile, { onConflict: "user_id" })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function saveReaderContactProfile(profile) {
+  const { data, error } = await requireClient()
+    .from("reader_contact_profiles")
     .upsert(profile, { onConflict: "user_id" })
     .select("*")
     .single();
@@ -98,10 +115,7 @@ export async function saveBookFeedback({ userId, bookId, status }) {
   if (error) throw error;
 }
 
-export async function deleteReadingData(userId) {
-  const client = requireClient();
-  const feedbackResult = await client.from("book_feedback").delete().eq("user_id", userId);
-  if (feedbackResult.error) throw feedbackResult.error;
-  const profileResult = await client.from("reading_profiles").delete().eq("user_id", userId);
-  if (profileResult.error) throw profileResult.error;
+export async function deleteReadingData() {
+  const { error } = await requireClient().rpc("delete_my_reading_data");
+  if (error) throw error;
 }

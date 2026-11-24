@@ -1,10 +1,8 @@
 # Nômade Literário
 
-Protótipo web para mapear preferências de leitura, gerar um relatório individual e organizar as respostas de um teste piloto.
+Plataforma responsiva para mapear preferências de leitura, gerar recomendações e salvar o perfil de cada leitor.
 
-## Abrir a plataforma
-
-Instale as dependências e inicie o servidor de desenvolvimento:
+## Executar localmente
 
 ```powershell
 npm ci
@@ -12,38 +10,44 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-Depois, abra o endereço local exibido pelo Vite no terminal.
+Sem credenciais do Supabase, o questionário funciona como protótipo local e a tela de conta explica que a autenticação ainda não está conectada. Com o projeto configurado, o cadastro, a confirmação de e-mail, a entrada, a recuperação de senha e o perfil passam a usar o backend.
 
-## O que funciona
+## O que está implementado
 
-- Questionário com as 12 perguntas de perfil do protótipo e 10 perguntas complementares.
-- Pontuação automática para Explorador, Imersivo, Investigador e Contemplativo, incluindo empates.
-- Indicação demonstrativa que combina perfil, gênero, tamanho do livro e temas a evitar.
-- Relatório individual na tela, com opção de imprimir ou salvar como PDF pelo navegador.
-- Painel da curadoria com contagem por perfil, respostas detalhadas e exportação CSV.
-- Layout responsivo, navegação por teclado e suporte a preferência por movimento reduzido.
+- Questionário com pontuação dos quatro perfis leitores e recomendações do catálogo demonstrativo.
+- Contas com e-mail e senha, confirmação de e-mail, recuperação e atualização de senha.
+- Perfil persistente com nome, faixa etária opcional, gêneros, temas a evitar e avaliações de livros.
+- Celular e endereço solicitados e salvos apenas quando a pessoa demonstra interesse em entrega em casa.
+- Exportação dos dados da conta em JSON e remoção do perfil, endereço, preferências e avaliações da conta.
+- Layout responsivo para computador e celular, navegação por teclado e preferência por movimento reduzido.
 
-O painel da curadoria fica habilitado apenas em `localhost`. A versão pública não recebe nem centraliza respostas.
+O questionário continua disponível sem conta. O cadastro é destinado a pessoas com 18 anos ou mais; essa condição é uma declaração da pessoa e não uma verificação de identidade ou idade. A faixa etária é opcional e não é coletada a data de nascimento.
 
-Na branch `feature/reading-accounts`, há uma área de conta para salvar o perfil, editar os gêneros e temas a evitar, e ajustar as próximas indicações com as escolhas “Quero ler”, “Já li” e “Não é meu estilo”. A pontuação do perfil não muda; o catálogo atual é demonstrativo.
+O interesse em entrega não cria pedido, cobrança ou garantia de disponibilidade. Esta versão não inclui pagamentos, estoque, logística nem integração com transportadoras. Telefone e endereço são apagados se a pessoa desmarcar a opção de entrega. O botão de remoção apaga os dados de perfil e leitura do banco, mas mantém a conta de acesso por e-mail e não apaga cópias locais salvas antes do login.
 
-## Dados e limites
+## Dados e segurança
 
-Sem uma conta configurada, as respostas ficam no armazenamento local do navegador em que o protótipo foi aberto. Na branch de contas, as respostas só são salvas na conta depois do cadastro e do consentimento explícito. A pessoa pode apagar o perfil e os sinais de leitura salvos na conta; isso não encerra a conta nem apaga a cópia local.
+- A autenticação é feita pelo Supabase Auth; as tabelas de perfil têm Row Level Security e cada pessoa só pode ler ou alterar as próprias linhas.
+- A aplicação usa somente a chave publicável do Supabase. Nunca inclua uma chave `secret`, `service_role` ou senha de banco em variável `VITE_*`, código cliente ou Git.
+- O formulário aceita Cloudflare Turnstile quando `VITE_TURNSTILE_SITE_KEY` está configurada. A chave secreta correspondente precisa ser ativada nas proteções anti-bot do Supabase.
+- As respostas e o endereço não ficam em tabelas públicas. O questionário sem conta salva no navegador; quando a pessoa está autenticada, o perfil é sincronizado à conta.
+- O resumo de privacidade aparece junto ao cadastro. Antes de uma operação comercial, complete a política de privacidade com a identificação jurídica do controlador, canal de contato, prazos de retenção e regras de compartilhamento com parceiros de entrega.
 
-O site principal continua sem contas, pagamentos, APIs próprias, uploads, modelos de IA ou banco de dados. A branch de contas usa Supabase Auth e tabelas com RLS para isolar os dados de cada usuário. Não reutilize o projeto Supabase `MyCardapio`: ele é de outro app e está inativo.
+## Configurar autenticação e banco
 
-### Configurar contas na branch
+Use um projeto Supabase dedicado ao Nômade Literário. O projeto `MyCardapio` existente é de outro aplicativo e está inativo; não o reutilize.
 
-1. Crie ou escolha um projeto Supabase dedicado ao Nômade Literário.
-2. Aplique `supabase/migrations/20261124180054_reading_profiles_and_feedback.sql` ao projeto.
-3. Configure no Supabase a URL base e os redirects permitidos para o endereço local e o preview Vercel. Mantenha a confirmação de e-mail habilitada.
-4. Copie `.env.example` para `.env` e preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
-5. No Vercel, defina essas mesmas variáveis apenas no ambiente **Preview** da branch até que ela seja aprovada.
+1. Aplique os arquivos em `supabase/migrations` em ordem pelo SQL Editor. Com o CLI, vincule o projeto e envie as migrações com `npx --yes supabase@latest link --project-ref <project-ref>` e `npx --yes supabase@latest db push --remote`.
+2. No Supabase, mantenha a confirmação de e-mail habilitada, configure senha mínima de 12 caracteres, SMTP próprio para confirmação/recuperação e redirects permitidos somente para localhost e os domínios Vercel usados.
+3. Para bloquear cadastros automatizados, configure a chave secreta do Turnstile em **Authentication → Bot and Abuse Protection**, ative a proteção CAPTCHA e defina a chave pública como `VITE_TURNSTILE_SITE_KEY` no build.
+4. Defina `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` em `.env` local e nos ambientes Vercel que devem aceitar contas. Não coloque chaves secretas no frontend.
+5. No Supabase, mantenha os alertas de segurança e revise o Security Advisor antes de abrir o cadastro ao público. Antes de despachar um livro, confirme telefone e endereço e apresente as condições de entrega.
 
-A chave publicável pode estar no navegador e é limitada por RLS. Nunca coloque uma chave `service_role` ou `secret` em `VITE_*`, no Git ou no código do cliente. Os arquivos `.env` são ignorados pelo Git e pela implantação.
+As contas não funcionam até que um projeto Supabase dedicado, as migrações, os redirects de e-mail e as variáveis de ambiente estejam configurados. O frontend exibe os formulários, mas mantém o envio desativado quando faltam essas credenciais.
 
-Os títulos do catálogo são exemplos para demonstrar o cruzamento das respostas com a curadoria. A disponibilidade e as notas de conteúdo precisam ser confirmadas antes de oferecer uma indicação real. Os quatro perfis são hipóteses exploratórias de preferência, não um teste psicológico ou uma versão do DISC.
+## Limites do catálogo
+
+Os títulos e as descrições atuais são demonstrativos. A disponibilidade, os links de compra, as notas de conteúdo e as recomendações precisam ser revisados pela curadoria antes de uma oferta comercial.
 
 ## Materiais de referência
 

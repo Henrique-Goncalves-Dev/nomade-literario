@@ -1,5 +1,7 @@
 import * as readingAccounts from "./account.js";
 
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || "";
+let turnstileScriptPromise;
 const PROFILE_LETTERS = { A: "explorador", B: "imersivo", C: "investigador", D: "contemplativo" };
 const PROFILES = [
   { key: "explorador", name: "Explorador", motive: "Descobrir", short: "Novos autores, gêneros diferentes e narrativas surpreendentes.", detail: "A curiosidade abre caminho. Você tende a gostar de novidade, variedade e mundos que ainda não conhece.", color: "#a36d26" },
@@ -59,6 +61,7 @@ const BOOKS = [
 ];
 
 const STORAGE_KEY = "nomade-literario-respostas-v1";
+const READ_BOOKS_KEY = "nomade-literario-livros-lidos-v1";
 const LOCAL_ADMIN_ENABLED = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 const state = {
   view: "home",
@@ -66,7 +69,7 @@ const state = {
   answers: {},
   report: null,
   selectedRecord: null,
-  account: { user: null, profile: null, feedback: [], loading: readingAccounts.accountsConfigured, mode: "login", message: "" },
+  account: { user: null, profile: null, contactProfile: null, feedback: [], loading: readingAccounts.accountsConfigured, mode: "login", message: "", captchaToken: "", captchaWidgetId: null },
 };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -76,9 +79,69 @@ const getProfile = (key) => PROFILES.find((profile) => profile.key === key);
 const getBook = (id) => BOOKS.find((book) => book.id === id);
 const getPurchaseUrl = (book) => `https://www.amazon.com.br/s?k=${encodeURIComponent(`${book.title} ${book.author}`)}`;
 
+function normalizeBrazilPhone(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("55") && [12, 13].includes(digits.length)) digits = digits.slice(2);
+  return [10, 11].includes(digits.length) ? `+55${digits}` : null;
+}
+
 function announce(message) {
   const live = $("#live-message");
   if (live) live.textContent = message;
+}
+
+function clearTurnstile() {
+  if (state.account.captchaWidgetId && window.turnstile) window.turnstile.remove(state.account.captchaWidgetId);
+  state.account.captchaWidgetId = null;
+  state.account.captchaToken = "";
+}
+
+function mountTurnstile() {
+  const container = $("#account-turnstile");
+  if (!TURNSTILE_SITE_KEY || !container) return;
+  const enableSubmit = (enabled) => {
+    const button = $("button[type=submit]", $("#account-auth-form"));
+    if (button && readingAccounts.accountsConfigured) button.disabled = !enabled;
+  };
+  const renderWidget = () => {
+    if (!container.isConnected || !window.turnstile || container.dataset.widgetId) return;
+    const widgetId = window.turnstile.render(container, {
+      sitekey: TURNSTILE_SITE_KEY,
+      callback: (token) => {
+        state.account.captchaToken = token;
+        enableSubmit(true);
+      },
+      "expired-callback": () => {
+        state.account.captchaToken = "";
+        enableSubmit(false);
+      },
+      "error-callback": () => {
+        state.account.captchaToken = "";
+        enableSubmit(false);
+      },
+    });
+    container.dataset.widgetId = widgetId;
+    state.account.captchaWidgetId = widgetId;
+  };
+  if (window.turnstile) {
+    renderWidget();
+    return;
+  }
+  if (!turnstileScriptPromise) {
+    turnstileScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.append(script);
+    });
+  }
+  turnstileScriptPromise.then(renderWidget).catch(() => {
+    state.account.message = "Não foi possível carregar a verificação de segurança. Tente atualizar a página.";
+    enableSubmit(false);
+  });
 }
 
 function syncAccountNav() {
@@ -95,10 +158,11 @@ async function refreshAccountData() {
   try {
     const data = await readingAccounts.loadReadingData(user.id);
     state.account.profile = data.profile;
+    state.account.contactProfile = data.contactProfile;
     state.account.feedback = data.feedback;
     state.account.message = "";
-  } catch (error) {
-    state.account.message = error.message || "Não foi possível carregar seus dados.";
+  } catch {
+    state.account.message = "Não foi possível carregar os dados da sua conta. Tente novamente.";
   } finally {
     state.account.loading = false;
     if (state.view === "account") renderAccount();
@@ -108,8 +172,15 @@ async function refreshAccountData() {
 function handleAuthChange(user, event) {
   state.account.user = user;
   state.account.profile = null;
+  state.account.contactProfile = null;
   state.account.feedback = [];
-  if (event === "PASSWORD_RECOVERY") state.account.mode = "update-password";
+  if (event === "PASSWORD_RECOVERY" && user) {
+    state.account.mode = "update-password";
+    state.account.loading = false;
+    syncAccountNav();
+    switchView("account");
+    return;
+  }
   state.account.loading = Boolean(user);
   syncAccountNav();
   if (user && state.account.mode !== "update-password") window.setTimeout(() => { if (state.account.user?.id === user.id) void refreshAccountData(); }, 0);
@@ -226,15 +297,16 @@ function getAvoidList(text) {
   return topics.filter((topic) => normalized.includes(topic));
 }
 
-function chooseBooks(answers, ranking, feedback = []) {
+function chooseBooks(answers, ranking, feedback = [], excludedBookIds = []) {
   const leaders = ranking.leaders.map((profile) => profile.key);
   const secondary = ranking.secondary.map((profile) => profile.key);
   const activeProfiles = leaders.length ? leaders : ranking.ranking.slice(0, 2).map((profile) => profile.key);
   const selectedGenres = (answers.q13 || []).map(normalize);
   const feedbackByBook = new Map(feedback.map(({ book_id, status }) => [book_id, status]));
+  const readBookIds = new Set([...getReadBookIds(), ...excludedBookIds]);
   const preferredLength = answers.q14;
   const avoided = getAvoidList(answers.q17);
-  const safeBooks = BOOKS.filter((book) => !["read", "skip"].includes(feedbackByBook.get(book.id)) && !book.alerts.some((alert) => avoided.includes(normalize(alert))));
+  const safeBooks = BOOKS.filter((book) => !readBookIds.has(book.id) && !["read", "skip"].includes(feedbackByBook.get(book.id)) && !book.alerts.some((alert) => avoided.includes(normalize(alert))));
   const rankedBooks = safeBooks.map((book) => {
     let score = book.profiles.some((key) => activeProfiles.includes(key)) ? 7 : 0;
     score += book.profiles.filter((key) => secondary.includes(key)).length * 1.4;
@@ -266,7 +338,7 @@ function saveRecord(record) {
 function profilePayload(record, user) {
   return {
     user_id: user.id,
-    display_name: String(user.user_metadata?.display_name || user.email?.split("@")[0] || "Leitor").slice(0, 120),
+    display_name: String(state.account.contactProfile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "Leitor").slice(0, 120),
     answers: record.answers,
     profile_scores: record.scores,
     profile_leaders: record.leaders,
@@ -284,10 +356,38 @@ async function saveProfileToAccount(record) {
   return true;
 }
 
+function getReadBookIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(READ_BOOKS_KEY) || "[]");
+    const knownBookIds = new Set(BOOKS.map((book) => book.id));
+    return Array.isArray(parsed) ? [...new Set(parsed.filter((id) => knownBookIds.has(id)))] : [];
+  } catch { return []; }
+}
+
+function markBookAsRead(bookId) {
+  if (!BOOKS.some((book) => book.id === bookId)) return false;
+  try {
+    localStorage.setItem(READ_BOOKS_KEY, JSON.stringify([...new Set([...getReadBookIds(), bookId])]));
+    return true;
+  } catch { return false; }
+}
+
+function updateSavedRecommendation(report) {
+  try {
+    const records = getRecords().map((record) => record.id === report.id ? {
+      ...record,
+      recommendation: report.picks[0]?.id || "",
+      alternatives: report.picks.slice(1).map((book) => book.id),
+      readBookIds: report.excludedBookIds || [],
+    } : record);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  } catch { /* A indicação atual continua valendo mesmo sem espaço para atualizar o histórico local. */ }
+}
+
 async function completeQuiz() {
   const scores = getScores(state.answers);
   const ranking = getRanking(scores);
-  const { picks, avoided } = chooseBooks(state.answers, ranking);
+  const { picks, avoided } = chooseBooks(state.answers, ranking, state.account.feedback);
   const record = {
     id: globalThis.crypto?.randomUUID?.() || `leitor-${Date.now()}`,
     createdAt: new Date().toISOString(),
@@ -299,7 +399,7 @@ async function completeQuiz() {
     alternatives: picks.slice(1).map((book) => book.id),
   };
   state.report = { ...record, ranking, picks, avoided };
-  const isSaved = saveRecord(record);
+  const isSaved = Boolean(state.account.user && readingAccounts.accountsConfigured) || saveRecord(record);
   renderReport(state.report);
   switchView("result");
   if (isSaved && state.account.user && readingAccounts.accountsConfigured) {
@@ -324,7 +424,7 @@ function profileHeadline(leaders) {
 }
 
 function renderBookFeature(book, index = 0) {
-  if (!book) return `<div class="recommendation-empty">Com o catálogo demonstrativo, não encontramos um título que respeite todos os temas que você quer evitar. A equipe pode montar uma curadoria manual a partir das suas respostas.</div>`;
+  if (!book) return `<div class="recommendation-empty">Não encontramos outro título no catálogo demonstrativo que respeite os temas que você quer evitar e a lista de livros que já leu. A equipe pode ampliar a curadoria a partir das suas preferências.</div>`;
   const isMain = index === 0;
   const bookLength = pageLabel(book.length);
   const purchaseLink = `<a class="${isMain ? "book-purchase-link" : "mini-book-link"}" href="${escapeHTML(getPurchaseUrl(book))}" target="_blank" rel="noopener noreferrer" aria-label="Encontrar ${escapeHTML(book.title)} de ${escapeHTML(book.author)} para comprar na Amazon Brasil">Encontrar para comprar na Amazon</a>`;
@@ -338,16 +438,48 @@ function renderBookFeature(book, index = 0) {
   </article>`;
 }
 
+const AGE_RANGE_OPTIONS = ["18-24", "25-34", "35-44", "45-54", "55+"];
+const BRAZIL_STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
+
+function renderContactProfileForm(profile, user) {
+  const saved = profile || {};
+  const isEditing = Boolean(profile);
+  const delivery = Boolean(saved.delivery_interest);
+  const stateOptions = BRAZIL_STATES.map((code) => `<option value="${code}" ${saved.state === code ? "selected" : ""}>${code}</option>`).join("");
+  const ageOptions = AGE_RANGE_OPTIONS.map((range) => `<option value="${range}" ${saved.age_range === range ? "selected" : ""}>${range} anos</option>`).join("");
+  return `<form class="account-preferences-form account-contact-form" id="account-contact-form">
+    <h2>Seus dados e entrega</h2>
+    <p>Cadastros disponíveis para maiores de 18 anos. A faixa etária é opcional. Seu e-mail de acesso é <strong>${escapeHTML(user.email || "")}</strong>.</p>
+    <label>Nome<input name="displayName" type="text" maxlength="120" autocomplete="name" value="${escapeHTML(saved.display_name || user.user_metadata?.display_name || "")}" required></label>
+    <label>Faixa etária (opcional)<select name="ageRange"><option value="">Prefiro não informar</option>${ageOptions}</select></label>
+    <details class="account-privacy-details"><summary>Como usamos esses dados</summary><p>Seu nome e a faixa etária escolhida compõem seu perfil. Celular e endereço só são solicitados e guardados se você demonstrar interesse em entrega. Esta tela não confirma disponibilidade, cria pedido ou realiza cobrança. Você pode baixar uma cópia e apagar os dados do perfil e da leitura pela sua conta.</p></details>
+    ${!isEditing ? `<label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Confirmo que tenho 18 anos ou mais. Menores podem responder ao questionário sem criar conta.</span></label><label class="account-consent"><input name="dataConsent" type="checkbox" required><span>Li o aviso acima e concordo em salvar estes dados na minha conta.</span></label>` : ""}
+    <fieldset class="account-delivery-choice"><legend>Receber livros em casa</legend><label class="account-consent"><input name="deliveryInterest" type="checkbox" ${delivery ? "checked" : ""}><span>Tenho interesse em receber livros em casa quando essa opção estiver disponível.</span></label><p>Marcar esta opção registra seu interesse, mas não cria pedido nem garante que a entrega esteja disponível.</p></fieldset>
+    <div class="account-delivery-fields" data-delivery-fields ${delivery ? "" : "hidden"}>
+      <label>Celular com DDD<input name="phone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="(11) 99999-9999" value="${escapeHTML(saved.phone || "")}" ${delivery ? "required" : ""} data-delivery-required></label>
+      <label>CEP<input name="postalCode" type="text" inputmode="numeric" maxlength="9" autocomplete="postal-code" placeholder="00000-000" value="${escapeHTML(saved.postal_code || "")}" ${delivery ? "required" : ""} data-delivery-required></label>
+      <label>Rua ou avenida<input name="street" type="text" maxlength="180" autocomplete="address-line1" value="${escapeHTML(saved.street || "")}" ${delivery ? "required" : ""} data-delivery-required></label>
+      <div class="account-address-grid"><label>Número<input name="addressNumber" type="text" maxlength="20" value="${escapeHTML(saved.address_number || "")}" ${delivery ? "required" : ""} data-delivery-required></label><label>Complemento (opcional)<input name="addressComplement" type="text" maxlength="120" autocomplete="address-line2" value="${escapeHTML(saved.address_complement || "")}"></label></div>
+      <label>Bairro<input name="neighborhood" type="text" maxlength="120" autocomplete="address-level3" value="${escapeHTML(saved.neighborhood || "")}" ${delivery ? "required" : ""} data-delivery-required></label>
+      <div class="account-address-grid"><label>Cidade<input name="city" type="text" maxlength="120" autocomplete="address-level2" value="${escapeHTML(saved.city || "")}" ${delivery ? "required" : ""} data-delivery-required></label><label>Estado<select name="state" autocomplete="address-level1" ${delivery ? "required" : ""} data-delivery-required><option value="">Selecione</option>${stateOptions}</select></label></div>
+      <label class="account-consent"><input name="deliveryConsent" type="checkbox" ${delivery ? "checked" : ""} ${delivery ? "required" : ""} data-delivery-required><span>Autorizo guardar meu celular e endereço para organizar uma entrega, caso esse serviço seja oferecido e eu confirme o pedido.</span></label>
+    </div>
+    <p class="account-data-notice">Usamos nome e faixa etária para administrar seu perfil. Celular e endereço só são salvos quando você demonstra interesse em entrega. Você pode editar ou apagar esses dados nesta conta.</p>
+    <button class="button button-primary" type="submit">Salvar meus dados</button>
+  </form>`;
+}
+
 function renderAccount() {
   const content = $("#account-content");
   if (!content) return;
+  clearTurnstile();
   const account = state.account;
   if (account.loading) {
     content.innerHTML = `<div class="account-loading" role="status">Carregando seu espaço de leitura…</div>`;
     return;
   }
   if (account.user && account.mode === "update-password") {
-    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Escolha uma nova senha.</h1><p>Depois de salvar, você volta ao seu perfil de leitura.</p></div><form class="account-auth-form" id="account-password-form"><h2>Atualizar senha</h2><label>Nova senha<input name="password" type="password" minlength="8" autocomplete="new-password" required><small>Use pelo menos 8 caracteres.</small></label><label>Confirme a nova senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit">Salvar nova senha</button></form></div>`;
+    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Escolha uma nova senha.</h1><p>Depois de salvar, você volta ao seu perfil de leitura.</p></div><form class="account-auth-form" id="account-password-form"><h2>Atualizar senha</h2><label>Nova senha<input name="password" type="password" minlength="12" autocomplete="new-password" required><small>Use pelo menos 12 caracteres.</small></label><label>Confirme a nova senha<input name="passwordConfirm" type="password" minlength="12" autocomplete="new-password" required></label><p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit">Salvar nova senha</button></form></div>`;
     return;
   }
   if (!account.user) {
@@ -357,18 +489,22 @@ function renderAccount() {
     const previewOnly = !readingAccounts.accountsConfigured;
     const title = signup ? "Crie seu espaço de leitura." : reset ? "Recupere o acesso." : "Volte às suas histórias.";
     const submitLabel = signup ? "Criar conta" : reset ? "Enviar link de recuperação" : "Entrar na minha conta";
-    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu mapa e suas escolhas ficam guardados na conta. A curadoria aprende com seus gêneros e com os livros que você salva ou descarta." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div></div>
-      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">Prévia visual: conecte o Supabase para ativar cadastro e entrada.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="8" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 8 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Concordo em salvar minhas respostas e preferências nesta conta para personalizar indicações. Posso mudar ou apagar esses dados.</span></label>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
+    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu perfil e suas escolhas ficam guardados na conta. Você pode mudar de gênero e receber indicações que acompanham seu momento." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div><p class="account-age-note">O cadastro é para maiores de 18 anos. O questionário pode ser respondido sem conta.</p></div>
+      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">A autenticação será ativada quando o projeto Supabase do Nômade Literário estiver configurado.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="12" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 12 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="12" autocomplete="new-password" required></label><details class="account-privacy-details"><summary>Como os dados serão usados</summary><p>O e-mail cria e protege sua conta. As respostas e preferências ficam vinculadas ao seu perfil para personalizar recomendações. Celular e endereço só serão solicitados se você demonstrar interesse em entrega. Você pode consultar, corrigir e apagar os dados salvos na sua conta.</p></details><label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Declaro que tenho 18 anos ou mais.</span></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Li o aviso acima e concordo em criar a conta e salvar minhas respostas e preferências.</span></label>` : ""}${TURNSTILE_SITE_KEY ? `<div class="account-turnstile" id="account-turnstile" aria-label="Verificação de segurança"></div>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly || TURNSTILE_SITE_KEY ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
+    mountTurnstile();
     return;
   }
 
   const user = account.user;
   const profile = account.profile;
-  const readerName = profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "leitor";
+  const contactProfile = account.contactProfile;
+  const readerName = contactProfile?.display_name || profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "leitor";
   const latestLocal = state.report || getRecords()[0] || null;
   const feedbackText = escapeHTML(account.message);
+  const contactEditor = `<details class="account-profile-details" ${contactProfile ? "" : "open"}><summary>Meus dados e entrega</summary>${renderContactProfileForm(contactProfile, user)}</details>`;
+  const dataActions = `<div class="account-data-actions"><button class="text-button" type="button" data-action="account-export-data">Baixar uma cópia dos meus dados</button><button class="text-button" type="button" data-action="account-delete-reading-data">Apagar meus dados de perfil e leitura</button><small>A exclusão remove nome, faixa etária, endereço, preferências e avaliações da conta, mas mantém o acesso por e-mail. Cópias salvas anteriormente neste navegador permanecem locais.</small></div>`;
   if (!profile) {
-    content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Seu perfil de leitura ainda não está salvo nesta conta. Faça o questionário ou traga o último resultado guardado neste navegador.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header><p class="account-form-message" role="status">${feedbackText}</p><div class="account-empty"><span aria-hidden="true">✳</span><h2>Vamos encontrar sua próxima leitura?</h2><p>Responda às perguntas para começar. Você pode mudar de estilo e de gênero depois.</p><div class="account-empty-actions"><button class="button button-primary" type="button" data-action="start-quiz">Fazer meu mapa <span aria-hidden="true">↗</span></button>${latestLocal ? `<button class="button button-outline" type="button" data-action="account-import-latest">Salvar o último resultado deste navegador</button>` : ""}</div></div>`;
+    content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Complete seus dados se quiser entrega em casa e faça o questionário para salvar seu perfil de leitura.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header><p class="account-form-message" role="status">${feedbackText}</p>${contactEditor}<div class="account-empty"><span aria-hidden="true">✳</span><h2>Vamos encontrar sua próxima leitura?</h2><p>Responda às perguntas para começar. Você pode mudar de estilo e de gênero depois.</p><div class="account-empty-actions"><button class="button button-primary" type="button" data-action="start-quiz">Fazer meu mapa <span aria-hidden="true">↗</span></button>${latestLocal ? `<button class="button button-outline" type="button" data-action="account-import-latest">Salvar o último resultado deste navegador</button>` : ""}</div></div>${dataActions}`;
     return;
   }
 
@@ -386,9 +522,9 @@ function renderAccount() {
   }).join("") : `<div class="recommendation-empty">Você já avaliou os títulos deste catálogo. Mude seus gêneros preferidos ou atualize o mapa para abrir novas possibilidades.</div>`;
   content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Este mapa é seu ponto de partida. As próximas indicações mudam conforme seus gêneros e escolhas.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header>
     <p class="account-form-message" role="status">${feedbackText}</p>
-    <div class="account-dashboard"><section class="account-column account-preferences"><article class="account-profile-card"><p class="eyebrow">Seu mapa de leitura</p><h2>${escapeHTML(profileHeadline(knownLeaders))}</h2><p>Gêneros: ${escapeHTML(favoriteLabels)}</p><ul class="account-score-list">${scoreSummary}</ul></article>
+    <div class="account-dashboard"><section class="account-column account-preferences">${contactEditor}<article class="account-profile-card"><p class="eyebrow">Seu mapa de leitura</p><h2>${escapeHTML(profileHeadline(knownLeaders))}</h2><p>Gêneros: ${escapeHTML(favoriteLabels)}</p><ul class="account-score-list">${scoreSummary}</ul></article>
       <form class="account-preferences-form" id="account-preferences-form"><h2>O que você quer ler agora?</h2><p>Marque ou desmarque gêneros. A próxima lista vai acompanhar sua escolha.</p><fieldset><legend>Gêneros preferidos</legend><div class="account-genre-list">${genres.map((genre) => `<label><input type="checkbox" name="genres" value="${escapeHTML(genre)}" ${preferredGenres.includes(genre) ? "checked" : ""}><span>${escapeHTML(genre)}</span></label>`).join("")}</div></fieldset><label class="account-avoid-label">Temas que você prefere evitar<textarea name="avoidedTopics" maxlength="500" placeholder="Ex.: violência, luto…">${escapeHTML(profile.avoided_topics || "")}</textarea></label><button class="button button-primary" type="submit">Salvar preferências</button></form>
-      <div class="account-data-actions"><button class="text-button" type="button" data-action="account-delete-reading-data">Apagar dados de leitura salvos nesta conta</button><small>Isso não encerra sua conta nem apaga os dados que continuam neste navegador.</small></div></section>
+      ${dataActions}</section>
       <section class="account-column account-recommendations"><div class="account-recommendation-heading"><div><p class="eyebrow">Sua próxima parada</p><h2>Livros que combinam com você</h2></div><p>Gêneros, temas e seus sinais de interesse ajustam a ordem a cada visita.</p></div><div class="account-recommendation-list">${recommendations}</div><button class="button button-outline account-retake" type="button" data-action="start-quiz">Atualizar meu mapa</button></section></div>`;
 }
 
@@ -420,13 +556,14 @@ function renderReport(report) {
     </div></section>
     <section class="recommendation-section"><div class="recommendation-head"><div><p class="eyebrow">UMA PRIMEIRA PARADA</p><h2>Sua indicação literária</h2></div><p>Perfil, interesses, extensão e temas a evitar ajudam a compor esta sugestão inicial.</p></div>
       ${renderBookFeature(report.picks[0])}
+      ${report.picks[0] ? `<div class="recommendation-feedback"><span>Já leu <strong>${escapeHTML(report.picks[0].title)}</strong>?</span><button class="text-button" type="button" data-action="mark-book-read" data-book-id="${escapeHTML(report.picks[0].id)}">Marcar como lido e sugerir outro</button></div>` : ""}
       ${report.picks.length > 1 ? `<div class="more-books" aria-label="Outras opções de leitura">${report.picks.slice(1).map((book, index) => renderBookFeature(book, index + 1)).join("")}</div>` : ""}
-      <p class="field-hint">Indicação gerada a partir de um catálogo demonstrativo do protótipo. A equipe de curadoria pode revisar cada sugestão.</p>
+      <p class="field-hint">Indicação gerada a partir de um catálogo demonstrativo. Os títulos marcados como lidos ficam salvos neste navegador e não voltam às próximas sugestões.</p>
     </section>
     <section class="report-context"><div><p class="eyebrow">O QUE VOCÊ GOSTA DE LER</p><h3>Seus interesses</h3><p>${escapeHTML(prefs)}</p><p style="margin-top:9px">${escapeHTML(pageLabel(report.answers.q14))} · ${escapeHTML(report.answers.q16 || "Tempo flexível")}</p></div><div><p class="eyebrow">PARA ESTA PRÓXIMA LEITURA</p><h3>O que você procura</h3><p>${escapeHTML(moment)}</p><p style="margin-top:9px"><strong>Temas para evitar:</strong> ${escapeHTML(excluded)}</p><p style="margin-top:9px"><strong>Formato:</strong> ${escapeHTML(report.answers.q22 || "Sem preferência")} · <strong>Investimento:</strong> ${escapeHTML(report.answers.q21 || "Ainda não definido")}</p></div></section>
     <blockquote class="report-quote">“${escapeHTML(quote)}”</blockquote>
     <p class="report-method"><strong>Como ler este resultado:</strong> este mapa descreve preferências de leitura e não é um teste psicológico, diagnóstico ou avaliação de personalidade. É uma hipótese exploratória, que pode mudar com suas experiências.</p>
-    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${state.account.user ? "" : `<button class="button button-outline" type="button" data-action="open-account">Criar conta para salvar meu perfil</button>`}${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
+    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${state.account.user ? "" : `<button class="button button-outline" type="button" data-action="open-signup">Criar conta para salvar meu perfil</button>`}${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
 }
 
 function formatDate(iso) {
@@ -536,31 +673,70 @@ document.addEventListener("click", (event) => {
   const action = actionTarget.dataset.action;
   if (action === "start-quiz") startQuiz();
   else if (action === "open-account") switchView("account");
+  else if (action === "open-signup") { state.account.mode = "signup"; switchView("account"); }
   else if (action === "account-mode") { state.account.mode = actionTarget.dataset.mode; state.account.message = ""; renderAccount(); }
-  else if (action === "account-sign-out") readingAccounts.signOut().catch((error) => { state.account.message = error.message || "Não foi possível sair da conta."; renderAccount(); });
+  else if (action === "account-sign-out") readingAccounts.signOut().catch(() => { state.account.message = "Não foi possível sair da conta. Tente novamente."; renderAccount(); });
   else if (action === "account-import-latest") {
     const latestRecord = state.report || getRecords()[0];
     if (latestRecord && window.confirm("Salvar as respostas do último resultado deste navegador nesta conta?")) {
-      saveProfileToAccount(latestRecord).then(() => { state.account.message = "Seu perfil foi salvo nesta conta."; renderAccount(); }).catch((error) => { state.account.message = error.message || "Não foi possível salvar esse perfil."; renderAccount(); });
+      saveProfileToAccount(latestRecord).then(() => { state.account.message = "Seu perfil foi salvo nesta conta."; renderAccount(); }).catch(() => { state.account.message = "Não foi possível salvar esse perfil. Tente novamente."; renderAccount(); });
     }
   } else if (action === "account-delete-reading-data") {
-    if (window.confirm("Apagar desta conta seu perfil e suas escolhas sobre livros? Esta ação não encerra a conta e não apaga os dados deste navegador.")) {
-      readingAccounts.deleteReadingData(state.account.user.id).then(() => {
+    if (window.confirm("Apagar desta conta seu nome, faixa etária, endereço, perfil de leitura e avaliações? A conta de acesso por e-mail continuará ativa.")) {
+      readingAccounts.deleteReadingData().then(() => {
         state.account.profile = null;
+        state.account.contactProfile = null;
         state.account.feedback = [];
-        state.account.message = "Os dados de leitura desta conta foram apagados.";
+        state.account.message = "Seus dados de perfil e leitura foram apagados desta conta.";
         renderAccount();
-      }).catch((error) => { state.account.message = error.message || "Não foi possível apagar os dados."; renderAccount(); });
+      }).catch(() => { state.account.message = "Não foi possível apagar os dados. Tente novamente."; renderAccount(); });
     }
+  } else if (action === "account-export-data") {
+    const exportData = {
+      exported_at: new Date().toISOString(),
+      email: state.account.user?.email || "",
+      contact_profile: state.account.contactProfile,
+      reading_profile: state.account.profile,
+      book_feedback: state.account.feedback,
+    };
+    const file = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const objectUrl = URL.createObjectURL(file);
+    const download = document.createElement("a");
+    download.href = objectUrl;
+    download.download = "nomade-literario-meus-dados.json";
+    download.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1200);
+    announce("Uma cópia dos dados da sua conta foi baixada.");
   } else if (action === "book-feedback") {
-    readingAccounts.saveBookFeedback({ userId: state.account.user.id, bookId: actionTarget.dataset.bookId, status: actionTarget.dataset.status }).then(() => refreshAccountData()).catch((error) => {
-      state.account.message = error.message || "Não foi possível guardar essa escolha.";
+    readingAccounts.saveBookFeedback({ userId: state.account.user.id, bookId: actionTarget.dataset.bookId, status: actionTarget.dataset.status }).then(() => refreshAccountData()).catch(() => {
+      state.account.message = "Não foi possível guardar essa escolha. Tente novamente.";
       renderAccount();
     });
   }
   else if (action === "print-report") window.print();
   else if (action === "restart-quiz") startQuiz();
   else if (action === "open-admin" && LOCAL_ADMIN_ENABLED) switchView("admin");
+  else if (action === "mark-book-read") {
+    const bookId = actionTarget.dataset.bookId;
+    if (!state.report || state.report.picks[0]?.id !== bookId) return;
+    const saved = markBookAsRead(bookId);
+    const excludedBookIds = [...new Set([...(state.report.excludedBookIds || []), bookId])];
+    const next = chooseBooks(state.report.answers, state.report.ranking, state.account.feedback, excludedBookIds);
+    state.report = { ...state.report, picks: next.picks, avoided: next.avoided, excludedBookIds };
+    updateSavedRecommendation(state.report);
+    if (state.account.user && readingAccounts.accountsConfigured) {
+      state.account.feedback = [...state.account.feedback.filter((item) => item.book_id !== bookId), { book_id: bookId, status: "read" }];
+      readingAccounts.saveBookFeedback({ userId: state.account.user.id, bookId, status: "read" }).then(() => refreshAccountData()).catch(() => {
+        state.account.message = "A indicação mudou neste navegador, mas não foi possível sincronizar o livro lido com sua conta.";
+        announce(state.account.message);
+        renderAccount();
+      });
+    }
+    renderReport(state.report);
+    announce(state.account.user && readingAccounts.accountsConfigured
+      ? "Marquei o livro como lido e atualizei sua indicação na conta."
+      : saved ? "Marquei o livro como lido e atualizei sua indicação." : "Atualizei a indicação, mas não consegui guardar essa escolha neste navegador.");
+  }
   else if (action === "export-csv") exportCSV();
   else if (action === "open-record") { state.selectedRecord = actionTarget.dataset.id; renderAdmin(); }
   else if (action === "close-record") { state.selectedRecord = null; renderAdmin(); }
@@ -581,6 +757,20 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener("change", (event) => {
+  const toggle = event.target.closest('#account-contact-form [name="deliveryInterest"]');
+  if (!toggle) return;
+  const fields = $("[data-delivery-fields]", toggle.form);
+  if (!fields) return;
+  fields.hidden = !toggle.checked;
+  $$('[data-delivery-required]', fields).forEach((field) => { field.required = toggle.checked; });
+  if (!toggle.checked) {
+    $$('input:not([type="checkbox"]), select', fields).forEach((field) => { field.value = ""; });
+    const consent = $('[name="deliveryConsent"]', fields);
+    if (consent) consent.checked = false;
+  }
+});
+
 document.addEventListener("submit", async (event) => {
   const authForm = event.target.closest("#account-auth-form");
   if (authForm) {
@@ -588,38 +778,111 @@ document.addEventListener("submit", async (event) => {
     const formData = new FormData(authForm);
     const mode = authForm.dataset.mode;
     const email = String(formData.get("email") || "").trim();
+    const captchaToken = state.account.captchaToken;
     const submitButton = $("button[type=submit]", authForm);
     submitButton.disabled = true;
     state.account.message = "";
     try {
+      if (TURNSTILE_SITE_KEY && !captchaToken) throw new Error("Conclua a verificação de segurança.");
       if (mode === "signup") {
         const password = String(formData.get("password") || "");
+        if (password.length < 12) throw new Error("Use uma senha com pelo menos 12 caracteres.");
         if (password !== formData.get("passwordConfirm")) throw new Error("As senhas não são iguais.");
+        if (!formData.get("adultConfirmed")) throw new Error("O cadastro está disponível apenas para pessoas maiores de 18 anos.");
         if (!formData.get("consent")) throw new Error("Marque a autorização para salvar e personalizar seu perfil.");
-        const { data, error } = await readingAccounts.createAccount({ displayName: String(formData.get("displayName") || "").trim(), email, password });
+        const { data, error } = await readingAccounts.createAccount({ displayName: String(formData.get("displayName") || "").trim(), email, password, captchaToken });
         if (error) throw error;
         if (data.session?.user) {
           handleAuthChange(data.session.user);
-          state.account.message = "Conta criada. Seu perfil já pode ser salvo nesta conta.";
+          state.account.message = "Conta criada. Confirme seus dados de perfil e depois faça seu mapa de leitura.";
           if (state.report) await saveProfileToAccount(state.report);
         } else {
-          state.account.message = "Conta criada. Confirme seu e-mail pelo link enviado para entrar e salvar seu perfil.";
+          state.account.message = "Conta criada. Confirme seu e-mail pelo link enviado e entre para completar o perfil.";
         }
       } else if (mode === "reset") {
-        const { error } = await readingAccounts.sendPasswordReset(email);
+        const { error } = await readingAccounts.sendPasswordReset(email, captchaToken);
         if (error) throw error;
         state.account.message = "Se houver uma conta para esse e-mail, enviaremos um link para redefinir a senha.";
       } else {
-        const { data, error } = await readingAccounts.signIn({ email, password: String(formData.get("password") || "") });
+        const { data, error } = await readingAccounts.signIn({ email, password: String(formData.get("password") || ""), captchaToken });
         if (error) throw error;
         handleAuthChange(data.user);
         state.account.message = "Entrada concluída.";
       }
     } catch (error) {
-      state.account.message = error.message || "Não foi possível concluir essa etapa.";
+      const detail = String(error?.message || "").toLowerCase();
+      state.account.message = detail.includes("senha") || detail.includes("password")
+        ? "Confira se a senha tem pelo menos 12 caracteres e se os dois campos estão iguais."
+        : mode === "reset"
+          ? "Se houver uma conta para esse e-mail, enviaremos um link para redefinir a senha."
+          : mode === "signup"
+            ? "Não foi possível criar a conta. Confira os dados e tente novamente."
+            : "Não foi possível entrar. Confira o e-mail e a senha ou confirme o e-mail da conta.";
     } finally {
       if (authForm.isConnected) submitButton.disabled = false;
       renderAccount();
+    }
+    return;
+  }
+
+  const contactForm = event.target.closest("#account-contact-form");
+  if (contactForm) {
+    event.preventDefault();
+    const formData = new FormData(contactForm);
+    const deliveryInterest = Boolean(formData.get("deliveryInterest"));
+    const displayName = String(formData.get("displayName") || "").trim().slice(0, 120);
+    const phone = deliveryInterest ? normalizeBrazilPhone(formData.get("phone")) : null;
+    const postalCode = deliveryInterest ? String(formData.get("postalCode") || "").replace(/\D/g, "") : null;
+    const existingProfile = state.account.contactProfile;
+    if (!displayName) {
+      state.account.message = "Informe seu nome.";
+      renderAccount();
+      return;
+    }
+    if (!existingProfile && !formData.get("adultConfirmed")) {
+      state.account.message = "O cadastro está disponível apenas para pessoas maiores de 18 anos.";
+      renderAccount();
+      return;
+    }
+    if (!existingProfile && !formData.get("dataConsent")) {
+      state.account.message = "Confirme que leu o aviso de privacidade para salvar seu perfil.";
+      renderAccount();
+      return;
+    }
+    if (deliveryInterest && (!phone || postalCode?.length !== 8 || !formData.get("deliveryConsent"))) {
+      state.account.message = "Confira o celular, o CEP e o consentimento para usar o endereço em uma possível entrega.";
+      renderAccount();
+      return;
+    }
+    const deliveryText = (name) => deliveryInterest ? String(formData.get(name) || "").trim() || null : null;
+    const payload = {
+      user_id: state.account.user.id,
+      display_name: displayName,
+      age_range: AGE_RANGE_OPTIONS.includes(String(formData.get("ageRange") || "")) ? String(formData.get("ageRange")) : null,
+      phone,
+      delivery_interest: deliveryInterest,
+      postal_code: postalCode,
+      street: deliveryText("street"),
+      address_number: deliveryText("addressNumber"),
+      address_complement: deliveryText("addressComplement"),
+      neighborhood: deliveryText("neighborhood"),
+      city: deliveryText("city"),
+      state: deliveryText("state"),
+    };
+    const submitButton = $("button[type=submit]", contactForm);
+    submitButton.disabled = true;
+    try {
+      state.account.contactProfile = await readingAccounts.saveReaderContactProfile(payload);
+      await refreshAccountData();
+      state.account.message = deliveryInterest
+        ? "Dados salvos. Seu interesse em entrega foi registrado, sem criar um pedido."
+        : "Dados salvos. Seu celular e endereço não foram guardados porque você não solicitou entrega.";
+      renderAccount();
+    } catch {
+      state.account.message = "Não foi possível salvar os dados. Confira as informações e tente novamente.";
+      renderAccount();
+    } finally {
+      if (contactForm.isConnected) submitButton.disabled = false;
     }
     return;
   }
@@ -629,6 +892,11 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(passwordForm);
     const password = String(formData.get("password") || "");
+    if (password.length < 12) {
+      state.account.message = "Use uma senha com pelo menos 12 caracteres.";
+      renderAccount();
+      return;
+    }
     if (password !== formData.get("passwordConfirm")) {
       state.account.message = "As senhas não são iguais.";
       renderAccount();
@@ -639,8 +907,8 @@ document.addEventListener("submit", async (event) => {
       state.account.mode = "login";
       state.account.message = "Senha atualizada.";
       await refreshAccountData();
-    } catch (error) {
-      state.account.message = error.message || "Não foi possível atualizar a senha.";
+    } catch {
+      state.account.message = "Não foi possível atualizar a senha. Confira a nova senha e tente novamente.";
       renderAccount();
     }
     return;
@@ -656,7 +924,7 @@ document.addEventListener("submit", async (event) => {
     try {
       state.account.profile = await readingAccounts.saveReadingProfile({
         user_id: state.account.user.id,
-        display_name: profile.display_name,
+        display_name: state.account.contactProfile?.display_name || profile.display_name,
         answers: { ...(profile.answers || {}), q13: preferredGenres, q17: avoidedTopics },
         profile_scores: profile.profile_scores,
         profile_leaders: profile.profile_leaders,
@@ -666,8 +934,8 @@ document.addEventListener("submit", async (event) => {
       });
       state.account.message = "Preferências salvas. Suas próximas sugestões já refletem essa mudança.";
       await refreshAccountData();
-    } catch (error) {
-      state.account.message = error.message || "Não foi possível salvar suas preferências.";
+    } catch {
+      state.account.message = "Não foi possível salvar suas preferências. Tente novamente.";
       renderAccount();
     }
   }
