@@ -342,11 +342,6 @@ function renderAccount() {
   const content = $("#account-content");
   if (!content) return;
   const account = state.account;
-  if (!readingAccounts.accountsConfigured) {
-    content.innerHTML = `<header class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Um lugar para suas próximas histórias.</h1><p>Crie uma conta para guardar seu perfil, mudar seus gêneros preferidos quando quiser e receber indicações que acompanham suas escolhas.</p></header>
-      <section class="account-setup-note"><div><strong>Cadastro aguardando conexão</strong><p>Esta branch já tem a tela e a estrutura segura de contas. Para ativar o cadastro, configure um projeto Supabase com as variáveis abaixo e aplique a migração incluída.</p></div><code>VITE_SUPABASE_URL<br>VITE_SUPABASE_PUBLISHABLE_KEY</code></section>`;
-    return;
-  }
   if (account.loading) {
     content.innerHTML = `<div class="account-loading" role="status">Carregando seu espaço de leitura…</div>`;
     return;
@@ -359,10 +354,11 @@ function renderAccount() {
     const mode = account.mode;
     const signup = mode === "signup";
     const reset = mode === "reset";
+    const previewOnly = !readingAccounts.accountsConfigured;
     const title = signup ? "Crie seu espaço de leitura." : reset ? "Recupere o acesso." : "Volte às suas histórias.";
     const submitLabel = signup ? "Criar conta" : reset ? "Enviar link de recuperação" : "Entrar na minha conta";
     content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu mapa e suas escolhas ficam guardados na conta. A curadoria aprende com seus gêneros e com os livros que você salva ou descarta." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div></div>
-      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="8" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 8 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Concordo em salvar minhas respostas e preferências nesta conta para personalizar indicações. Posso mudar ou apagar esses dados.</span></label>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit">${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
+      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">Prévia visual: conecte o Supabase para ativar cadastro e entrada.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="8" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 8 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Concordo em salvar minhas respostas e preferências nesta conta para personalizar indicações. Posso mudar ou apagar esses dados.</span></label>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
     return;
   }
 
@@ -687,6 +683,7 @@ $(".menu-toggle")?.addEventListener("click", (event) => {
 syncAccountNav();
 readingAccounts.subscribeToAuth(handleAuthChange);
 if (!readingAccounts.accountsConfigured) state.account.loading = false;
+if (new URLSearchParams(window.location.search).get("view") === "account") switchView("account");
 
 if (LOCAL_ADMIN_ENABLED) {
   $$('[data-local-admin]').forEach((control) => { control.hidden = false; });
