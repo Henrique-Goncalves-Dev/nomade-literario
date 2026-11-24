@@ -4,13 +4,15 @@ Protótipo web para mapear preferências de leitura, gerar um relatório individ
 
 ## Abrir a plataforma
 
-Não há etapa de build nem dependências de JavaScript. Na pasta do projeto, execute:
+Instale as dependências e inicie o servidor de desenvolvimento:
 
 ```powershell
-python -m http.server 8000
+npm ci
+Copy-Item .env.example .env
+npm run dev
 ```
 
-Depois, abra <http://localhost:8000> no navegador.
+Depois, abra o endereço local exibido pelo Vite no terminal.
 
 ## O que funciona
 
@@ -23,11 +25,23 @@ Depois, abra <http://localhost:8000> no navegador.
 
 O painel da curadoria fica habilitado apenas em `localhost`. A versão pública não recebe nem centraliza respostas.
 
+Na branch `feature/reading-accounts`, há uma área de conta para salvar o perfil, editar os gêneros e temas a evitar, e ajustar as próximas indicações com as escolhas “Quero ler”, “Já li” e “Não é meu estilo”. A pontuação do perfil não muda; o catálogo atual é demonstrativo.
+
 ## Dados e limites
 
-As respostas ficam no armazenamento local do navegador em que o protótipo foi aberto. Elas não são enviadas a um servidor, e o CSV permite levar os dados para uma planilha. O painel não sincroniza entre dispositivos e não envia relatórios por e-mail.
+Sem uma conta configurada, as respostas ficam no armazenamento local do navegador em que o protótipo foi aberto. Na branch de contas, as respostas só são salvas na conta depois do cadastro e do consentimento explícito. A pessoa pode apagar o perfil e os sinais de leitura salvos na conta; isso não encerra a conta nem apaga a cópia local.
 
-O site público é estático e não oferece contas, pagamentos, APIs, uploads, modelos de IA ou banco de dados. Não adicione segredos ao código ou ao navegador; arquivos `.env` são ignorados pelo Git e pela implantação.
+O site principal continua sem contas, pagamentos, APIs próprias, uploads, modelos de IA ou banco de dados. A branch de contas usa Supabase Auth e tabelas com RLS para isolar os dados de cada usuário. Não reutilize o projeto Supabase `MyCardapio`: ele é de outro app e está inativo.
+
+### Configurar contas na branch
+
+1. Crie ou escolha um projeto Supabase dedicado ao Nômade Literário.
+2. Aplique `supabase/migrations/20261124180054_reading_profiles_and_feedback.sql` ao projeto.
+3. Configure no Supabase a URL base e os redirects permitidos para o endereço local e o preview Vercel. Mantenha a confirmação de e-mail habilitada.
+4. Copie `.env.example` para `.env` e preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
+5. No Vercel, defina essas mesmas variáveis apenas no ambiente **Preview** da branch até que ela seja aprovada.
+
+A chave publicável pode estar no navegador e é limitada por RLS. Nunca coloque uma chave `service_role` ou `secret` em `VITE_*`, no Git ou no código do cliente. Os arquivos `.env` são ignorados pelo Git e pela implantação.
 
 Os títulos do catálogo são exemplos para demonstrar o cruzamento das respostas com a curadoria. A disponibilidade e as notas de conteúdo precisam ser confirmadas antes de oferecer uma indicação real. Os quatro perfis são hipóteses exploratórias de preferência, não um teste psicológico ou uma versão do DISC.
 

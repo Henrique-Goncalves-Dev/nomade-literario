@@ -1,0 +1,114 @@
+.account-auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+  align-items: start;
+  gap: clamp(38px, 7vw, 92px);
+  max-width: 1050px;
+  margin: 74px auto 54px;
+}
+.account-intro { max-width: 650px; }
+.account-intro h1 { max-width: 620px; margin: 9px 0 17px; font-size: clamp(39px, 5vw, 62px); line-height: 1.08; }
+.account-intro > p:last-child { max-width: 540px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+.account-auth-note { display: flex; align-items: start; gap: 14px; max-width: 470px; margin-top: 39px; padding: 16px 18px; border-left: 2px solid var(--rose); background: #f4eeea; }
+.account-auth-note span { color: var(--rose); font-size: 20px; line-height: 1.2; }
+.account-auth-note p { margin: 0; color: #61565b; font-size: 12px; line-height: 1.75; }
+.account-auth-form { display: grid; gap: 17px; padding: 27px 29px 25px; border-top: 3px solid var(--rose); background: var(--white); }
+.account-auth-form h2 { margin: 0 0 3px; font-family: var(--font-display); font-size: 27px; font-weight: 400; line-height: 1.25; }
+.account-auth-form > label, .account-avoid-label { display: grid; gap: 6px; color: var(--ink); font-size: 11px; font-weight: 600; }
+.account-auth-form input:not([type="checkbox"]), .account-avoid-label textarea { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid #d8cccf; border-radius: 2px; color: var(--ink); background: white; font-size: 13px; }
+.account-auth-form input:focus, .account-avoid-label textarea:focus { outline: 2px solid rgba(168,62,105,.38); outline-offset: 1px; }
+.account-auth-form small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.account-consent { display: grid !important; grid-template-columns: 17px minmax(0,1fr); align-items: start; gap: 8px !important; color: var(--muted) !important; font-size: 10px !important; font-weight: 400 !important; line-height: 1.65; }
+.account-consent input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--rose); }
+.account-auth-form .button { width: 100%; }
+.account-form-message { min-height: 18px; margin: 0; color: var(--rose-dark); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.account-auth-switch { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 14px; }
+.account-auth-switch button, .account-feedback button { padding: 6px 0; border: 0; color: var(--rose-dark); background: transparent; font-size: 10px; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.account-welcome { display: flex; align-items: start; justify-content: space-between; gap: 24px; max-width: 1160px; margin: 48px auto 17px; }
+.account-welcome h1 { font-size: clamp(36px, 4.5vw, 54px); }
+.account-welcome .button { flex: 0 0 auto; }
+.account-dashboard { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); align-items: start; gap: clamp(28px, 4vw, 52px); max-width: 1160px; margin: 18px auto 46px; }
+.account-column { min-width: 0; }
+.account-profile-card { padding: 22px 23px; border-left: 2px solid var(--blue); background: #f0efec; }
+.account-profile-card h2 { margin: 5px 0 9px; font-family: var(--font-display); font-size: 25px; font-weight: 400; line-height: 1.3; }
+.account-profile-card > p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.account-score-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 18px; margin: 17px 0 0; padding: 13px 0 0; border-top: 1px solid #d9d3d0; list-style: none; }
+.account-score-list li { display: flex; justify-content: space-between; gap: 8px; color: #5f555a; font-size: 10px; }
+.account-score-list strong { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.account-preferences-form { display: grid; gap: 15px; margin-top: 18px; padding: 21px 22px; border: 1px solid var(--line); background: var(--white); }
+.account-preferences-form h2, .account-recommendation-heading h2, .account-empty h2 { margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 400; line-height: 1.25; }
+.account-preferences-form > p, .account-recommendation-heading > p { margin: -7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.account-preferences-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.account-preferences-form legend { margin-bottom: 8px; color: var(--ink); font-size: 11px; font-weight: 600; }
+.account-genre-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.account-genre-list label { display: flex; align-items: start; gap: 7px; min-width: 0; color: #5e5358; font-size: 10px; line-height: 1.45; cursor: pointer; }
+.account-genre-list input { flex: 0 0 auto; width: 14px; height: 14px; margin: 1px 0 0; accent-color: var(--rose); }
+.account-avoid-label textarea { min-height: 74px; resize: vertical; font-weight: 400; }
+.account-preferences-form .button { justify-self: start; min-height: 42px; }
+.account-data-actions { display: grid; justify-items: start; gap: 4px; margin-top: 16px; }
+.account-data-actions small { max-width: 350px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.account-data-actions .text-button { color: var(--rose-dark); font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
+.account-recommendation-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 15px; }
+.account-recommendation-heading .eyebrow { margin-bottom: 5px; }
+.account-recommendation-heading > p { max-width: 205px; margin: 0 0 3px; }
+.account-recommendation-list { display: grid; gap: 13px; }
+.account-recommendation { min-width: 0; padding: 13px; border: 1px solid var(--line); background: var(--white); }
+.account-recommendation .book-feature { grid-template-columns: 145px minmax(0,1fr); gap: 17px; padding: 0; border: 0; }
+.account-recommendation .book-cover { min-height: 190px; }
+.account-recommendation .book-copy { min-width: 0; padding: 9px 2px; }
+.account-recommendation .book-copy h3 { font-size: 23px; overflow-wrap: anywhere; }
+.account-recommendation .book-copy > p:not(.eyebrow):not(.book-author) { font-size: 10px; }
+.account-recommendation .mini-book { padding: 3px 2px 5px; border: 0; }
+.account-feedback { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 9px 3px 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.account-feedback button { padding: 4px 0; font-size: 9px; text-decoration: none; }
+.account-feedback button[aria-pressed="true"] { color: var(--green); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.account-retake { margin-top: 16px; }
+.account-empty { max-width: 750px; margin: 28px auto 70px; padding: 36px 38px; border-left: 2px solid var(--rose); background: #f4eeea; }
+.account-empty > span { color: var(--rose); font-size: 21px; }
+.account-empty h2 { margin-top: 8px; font-size: 31px; }
+.account-empty p { max-width: 510px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.account-empty-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.account-setup-note { display: flex; align-items: start; justify-content: space-between; gap: 30px; max-width: 920px; margin: 45px auto 90px; padding: 22px 25px; border-left: 2px solid var(--rose); background: #f4eeea; }
+.account-setup-note strong { font-family: var(--font-display); font-size: 22px; font-weight: 400; }
+.account-setup-note p { max-width: 600px; margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
+.account-setup-note code { flex: 0 0 auto; padding: 10px 12px; color: var(--rose-dark); background: var(--white); font-size: 10px; line-height: 1.8; }
+.account-loading { max-width: 1160px; min-height: 260px; margin: 55px auto; color: var(--muted); font-family: var(--font-display); font-size: 23px; }
+
+@media (max-width: 900px) {
+  .account-auth-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 390px); gap: 30px; margin-top: 56px; }
+  .account-dashboard { grid-template-columns: 1fr; gap: 28px; }
+  .account-preferences { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items: start; gap: 14px; }
+  .account-profile-card, .account-preferences-form { margin: 0; }
+  .account-data-actions { align-self: center; margin: 0; }
+}
+
+@media (max-width: 650px) {
+  .account-auth-layout { grid-template-columns: minmax(0,1fr); gap: 24px; margin: 40px auto 30px; }
+  .account-intro h1 { font-size: clamp(36px, 11vw, 48px); }
+  .account-intro > p:last-child { font-size: 12px; }
+  .account-auth-note { margin-top: 22px; }
+  .account-auth-form { gap: 14px; padding: 22px 19px; }
+  .account-auth-form h2 { font-size: 24px; }
+  .account-welcome { flex-direction: column; gap: 5px; margin: 35px auto 17px; }
+  .account-welcome .button { width: 100%; }
+  .account-preferences { grid-template-columns: minmax(0,1fr); gap: 13px; }
+  .account-profile-card, .account-preferences-form { padding: 19px 17px; }
+  .account-genre-list { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .account-preferences-form .button, .account-retake { width: 100%; }
+  .account-recommendation-heading { align-items: start; flex-direction: column; gap: 4px; }
+  .account-recommendation-heading > p { max-width: none; }
+  .account-recommendation { padding: 10px; }
+  .account-recommendation .book-feature { grid-template-columns: minmax(0,1fr); gap: 7px; }
+  .account-recommendation .book-cover { min-height: 168px; }
+  .account-recommendation .book-copy { padding: 12px 3px 3px; }
+  .account-recommendation .book-copy h3 { font-size: 23px; }
+  .account-feedback { gap: 5px 13px; }
+  .account-feedback button { min-height: 32px; }
+  .account-empty { margin: 22px 0 55px; padding: 25px 19px; }
+  .account-empty h2 { font-size: 26px; }
+  .account-empty-actions { flex-direction: column; }
+  .account-empty-actions .button { width: 100%; }
+  .account-setup-note { flex-direction: column; gap: 14px; margin: 24px auto 55px; padding: 18px; }
+  .account-setup-note code { max-width: 100%; overflow-wrap: anywhere; }
+  .account-loading { min-height: 180px; margin: 35px auto; font-size: 20px; }
+}
