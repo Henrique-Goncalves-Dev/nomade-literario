@@ -2,3 +2,6 @@
 .temp
 tmp/
 temp/
+.env
+.env.*
+!.env.example

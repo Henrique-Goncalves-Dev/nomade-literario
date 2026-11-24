@@ -1,3 +1,5 @@
 /README.md
 /transcricao-audio.md
 /tmp/
+/.env
+/.env.*

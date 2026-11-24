@@ -57,6 +57,7 @@ const BOOKS = [
 ];
 
 const STORAGE_KEY = "nomade-literario-respostas-v1";
+const LOCAL_ADMIN_ENABLED = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 const state = { view: "home", step: -1, answers: {}, report: null, selectedRecord: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -64,6 +65,7 @@ const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 const normalize = (value) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const getProfile = (key) => PROFILES.find((profile) => profile.key === key);
 const getBook = (id) => BOOKS.find((book) => book.id === id);
+const getPurchaseUrl = (book) => `https://www.amazon.com.br/s?k=${encodeURIComponent(`${book.title} ${book.author}`)}`;
 
 function announce(message) {
   const live = $("#live-message");
@@ -71,6 +73,10 @@ function announce(message) {
 }
 
 function switchView(view) {
+  if (view === "admin" && !LOCAL_ADMIN_ENABLED) {
+    view = "home";
+    announce("O painel local não está disponível na versão pública.");
+  }
   state.view = view;
   $$(".screen").forEach((screen) => {
     const isActive = screen.id === `${view}-view`;
@@ -122,7 +128,7 @@ function renderQuiz() {
       <div class="quiz-intro-copy"><p class="eyebrow">Seu mapa de leitura</p><h1 id="quiz-heading" tabindex="-1">Um pouco sobre<br><em>o seu jeito.</em></h1><p>São 12 escolhas para entender o que move sua leitura. Depois, algumas preferências ajudam a encontrar um livro para o seu momento.</p></div>
       <aside class="intro-note"><strong>Leva cerca de 4 minutos</strong><p>As 12 primeiras respostas compõem seu perfil. As demais orientam a indicação e não alteram a pontuação. O resultado é uma hipótese de preferência, não um diagnóstico.</p></aside>
     </div>
-    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que minhas respostas ficam salvas somente neste navegador para acompanhar o teste piloto; elas não são enviadas a um servidor.</span></label>
+    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que minhas respostas ficam salvas somente neste navegador e não são enviadas à equipe nem a um servidor nesta versão.</span></label>
     <div class="begin-wrap"><button class="button button-primary" id="begin-mapping" type="button" disabled>Começar as perguntas <span aria-hidden="true">↗</span></button></div>`;
     $("#consent-check", content)?.addEventListener("change", (event) => { $("#begin-mapping", content).disabled = !event.target.checked; });
     $("#begin-mapping", content)?.addEventListener("click", () => { state.step = 0; renderQuiz(); window.scrollTo({ top: 0, behavior: "smooth" }); $("#quiz-heading")?.focus({ preventScroll: true }); });
@@ -243,12 +249,13 @@ function renderBookFeature(book, index = 0) {
   if (!book) return `<div class="recommendation-empty">Com o catálogo demonstrativo, não encontramos um título que respeite todos os temas que você quer evitar. A equipe pode montar uma curadoria manual a partir das suas respostas.</div>`;
   const isMain = index === 0;
   const bookLength = pageLabel(book.length);
+  const purchaseLink = `<a class="${isMain ? "book-purchase-link" : "mini-book-link"}" href="${escapeHTML(getPurchaseUrl(book))}" target="_blank" rel="noopener noreferrer" aria-label="Encontrar ${escapeHTML(book.title)} de ${escapeHTML(book.author)} para comprar na Amazon Brasil">Encontrar para comprar na Amazon</a>`;
   return `<article class="${isMain ? "book-feature" : "mini-book"}">
     ${isMain ? `<div class="book-cover" style="background:${escapeHTML(book.color)}"><small>NÔMADE · LEITURA ${String(index + 1).padStart(2, "0")}</small><strong>${escapeHTML(book.title)}</strong><small class="cover-author">${escapeHTML(book.author)}</small></div>` : ""}
     <div class="${isMain ? "book-copy" : ""}">
       ${isMain ? `<p class="eyebrow">${escapeHTML(index === 0 ? "Sua indicação principal" : "Outra rota possível")}</p>` : ""}
       <h3>${escapeHTML(book.title)}</h3>${isMain ? `<p class="book-author">${escapeHTML(book.author)}</p>` : `<p>${escapeHTML(book.author)} · ${escapeHTML(bookLength)}</p>`}
-      ${isMain ? `<p>${escapeHTML(book.summary)} ${escapeHTML(book.note)}</p><div class="book-meta"><span>${escapeHTML(bookLength)}</span>${book.genres.slice(0, 2).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>${book.alerts.length ? `<p class="content-note">Temas presentes na obra: ${escapeHTML(book.alerts.join(", "))}.</p>` : ""}` : ""}
+      ${isMain ? `<p>${escapeHTML(book.summary)} ${escapeHTML(book.note)}</p><div class="book-meta"><span>${escapeHTML(bookLength)}</span>${book.genres.slice(0, 2).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>${book.alerts.length ? `<p class="content-note">Temas presentes na obra: ${escapeHTML(book.alerts.join(", "))}.</p>` : ""}${purchaseLink}` : purchaseLink}
     </div>
   </article>`;
 }
@@ -270,7 +277,7 @@ function renderReport(report) {
   const quote = leaders.length > 1 ? "Você reúne mais de um jeito de ler. Use este mapa como ponto de partida, sem limitar as próximas descobertas." : leaders[0]?.short || "Seu mapa reúne diferentes maneiras de aproveitar uma história.";
   content.innerHTML = `<header class="result-header">
       <div><p class="eyebrow">Seu mapa está pronto</p><h1 id="report-title" tabindex="-1">Um caminho de<br><em>leitura para você.</em></h1></div>
-      <div class="result-actions"><button class="button button-outline button-small" type="button" data-action="print-report">Salvar relatório em PDF</button><button class="button button-outline button-small" type="button" data-action="open-admin">Ver painel piloto</button></div>
+      <div class="result-actions"><button class="button button-outline button-small" type="button" data-action="print-report">Salvar relatório em PDF</button>${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline button-small" type="button" data-action="open-admin">Ver painel piloto</button>` : ""}</div>
     </header>
     <section class="result-grid" aria-label="Resumo do perfil">
       <article class="report-primary"><p class="eyebrow">SEU PERFIL LEITOR</p><h2>${escapeHTML(profileHeadline(leaders))}</h2><p>${escapeHTML(topDescription)}</p><span class="result-tag">${leaders.map((profile) => `${escapeHTML(profile.name)} · ${report.scores[profile.key]}`).join(" &nbsp; / &nbsp; ")}</span></article>
@@ -287,7 +294,7 @@ function renderReport(report) {
     <section class="report-context"><div><p class="eyebrow">O QUE VOCÊ GOSTA DE LER</p><h3>Seus interesses</h3><p>${escapeHTML(prefs)}</p><p style="margin-top:9px">${escapeHTML(pageLabel(report.answers.q14))} · ${escapeHTML(report.answers.q16 || "Tempo flexível")}</p></div><div><p class="eyebrow">PARA ESTA PRÓXIMA LEITURA</p><h3>O que você procura</h3><p>${escapeHTML(moment)}</p><p style="margin-top:9px"><strong>Temas para evitar:</strong> ${escapeHTML(excluded)}</p><p style="margin-top:9px"><strong>Formato:</strong> ${escapeHTML(report.answers.q22 || "Sem preferência")} · <strong>Investimento:</strong> ${escapeHTML(report.answers.q21 || "Ainda não definido")}</p></div></section>
     <blockquote class="report-quote">“${escapeHTML(quote)}”</blockquote>
     <p class="report-method"><strong>Como ler este resultado:</strong> este mapa descreve preferências de leitura e não é um teste psicológico, diagnóstico ou avaliação de personalidade. É uma hipótese exploratória, que pode mudar com suas experiências.</p>
-    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button><button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button></div>`;
+    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
 }
 
 function formatDate(iso) {
@@ -303,6 +310,10 @@ function recordProfileLabel(record) {
 function renderAdmin() {
   const content = $("#admin-content");
   if (!content) return;
+  if (!LOCAL_ADMIN_ENABLED) {
+    content.innerHTML = `<div class="empty-state"><strong>Painel indisponível</strong>O painel deste protótipo só funciona localmente e não reúne respostas de outros navegadores.</div>`;
+    return;
+  }
   const records = getRecords();
   const distribution = Object.fromEntries(PROFILES.map(({ key }) => [key, 0]));
   records.forEach((record) => (record.leaders || []).forEach((key) => { if (key in distribution) distribution[key] += 1; }));
@@ -394,7 +405,7 @@ document.addEventListener("click", (event) => {
   if (action === "start-quiz") startQuiz();
   else if (action === "print-report") window.print();
   else if (action === "restart-quiz") startQuiz();
-  else if (action === "open-admin") switchView("admin");
+  else if (action === "open-admin" && LOCAL_ADMIN_ENABLED) switchView("admin");
   else if (action === "export-csv") exportCSV();
   else if (action === "open-record") { state.selectedRecord = actionTarget.dataset.id; renderAdmin(); }
   else if (action === "close-record") { state.selectedRecord = null; renderAdmin(); }
@@ -421,6 +432,10 @@ $(".menu-toggle")?.addEventListener("click", (event) => {
   event.currentTarget.setAttribute("aria-expanded", String(isOpen));
   event.currentTarget.setAttribute("aria-label", isOpen ? "Fechar navegação" : "Abrir navegação");
 });
+
+if (LOCAL_ADMIN_ENABLED) {
+  $$('[data-local-admin]').forEach((control) => { control.hidden = false; });
+}
 
 $$('[data-home-anchor]').forEach((link) => link.addEventListener("click", (event) => {
   event.preventDefault();

@@ -33,6 +33,7 @@ a { color: inherit; }
 .main-nav a { color: var(--muted); text-decoration: none; }
 .main-nav a:hover, .text-button:hover { color: var(--rose); }
 .nav-tool { padding: 10px 13px; border: 1px solid var(--line); border-radius: 2px; background: transparent; font-size: 12px; cursor: pointer; }
+.nav-tool[hidden] { display: none !important; }
 .nav-tool span { margin-left: 5px; color: var(--rose); }
 .nav-tool:hover { border-color: var(--rose); }
 .menu-toggle { display: none; padding: 8px; border: 0; background: transparent; }
@@ -217,6 +218,10 @@ h1 em, h2 em { color: var(--rose); font-weight: 400; }
 .book-copy > p:not(.eyebrow):not(.book-author) { max-width: 560px; margin-bottom: 15px; color: var(--muted); font-size: 11px; line-height: 1.8; }
 .book-meta { display: flex; flex-wrap: wrap; gap: 8px; }
 .book-meta span { padding: 5px 8px; color: #6d5a62; background: #f3ecee; font-size: 9px; }
+.book-purchase-link, .mini-book-link { display: inline-block; width: fit-content; color: var(--rose-dark); font-size: 11px; font-weight: 700; text-decoration: underline; text-decoration-color: #d3a4b7; text-underline-offset: 4px; }
+.book-purchase-link { margin-top: 15px; }
+.mini-book-link { margin-top: 11px; font-size: 10px; }
+.book-purchase-link:hover, .mini-book-link:hover { color: var(--rose); text-decoration-color: var(--rose); }
 .content-note { margin-top: 11px; color: #806d74; font-size: 10px; }
 .recommendation-empty { padding: 22px; border: 1px solid var(--line); color: var(--muted); background: var(--white); font-size: 12px; line-height: 1.8; }
 .more-books { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; margin-top: 14px; }
