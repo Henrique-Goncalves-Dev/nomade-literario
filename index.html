@@ -10,7 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <script src="app.js" defer></script>
+    <link rel="stylesheet" href="account.css">
+    <script type="module" src="/app.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#app-main">Pular para o conteúdo</a>
@@ -22,6 +23,7 @@
       <nav class="main-nav" aria-label="Navegação principal">
         <a href="#como-funciona" data-home-anchor>Como funciona</a>
         <a href="#perfis" data-home-anchor>Perfis leitores</a>
+        <button class="nav-tool" type="button" data-view="account" data-account-nav>Entrar / criar conta</button>
         <button class="nav-tool" type="button" data-view="admin" data-local-admin hidden>Painel da curadoria</button>
       </nav>
       <button class="menu-toggle" type="button" aria-label="Abrir navegação" aria-expanded="false">
@@ -120,6 +122,10 @@
 
       <section class="screen workspace-screen" id="result-view" hidden aria-labelledby="report-title">
         <div class="workspace-wrap"><div class="workspace-topline"><button class="text-button" type="button" data-view="home">← Início</button><span>SEU RELATÓRIO DE LEITURA</span></div><div id="result-content"></div></div>
+      </section>
+
+      <section class="screen workspace-screen account-screen" id="account-view" hidden aria-labelledby="account-title">
+        <div class="workspace-wrap"><div class="workspace-topline"><button class="text-button" type="button" data-view="home">← Início</button><span>SEU ESPAÇO DE LEITURA</span></div><div id="account-content"></div></div>
       </section>
 
       <section class="screen workspace-screen admin-screen" id="admin-view" hidden aria-labelledby="admin-title">

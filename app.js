@@ -1,3 +1,5 @@
+import * as readingAccounts from "./account.js";
+
 const PROFILE_LETTERS = { A: "explorador", B: "imersivo", C: "investigador", D: "contemplativo" };
 const PROFILES = [
   { key: "explorador", name: "Explorador", motive: "Descobrir", short: "Novos autores, gêneros diferentes e narrativas surpreendentes.", detail: "A curiosidade abre caminho. Você tende a gostar de novidade, variedade e mundos que ainda não conhece.", color: "#a36d26" },
@@ -58,7 +60,14 @@ const BOOKS = [
 
 const STORAGE_KEY = "nomade-literario-respostas-v1";
 const LOCAL_ADMIN_ENABLED = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
-const state = { view: "home", step: -1, answers: {}, report: null, selectedRecord: null };
+const state = {
+  view: "home",
+  step: -1,
+  answers: {},
+  report: null,
+  selectedRecord: null,
+  account: { user: null, profile: null, feedback: [], loading: readingAccounts.accountsConfigured, mode: "login", message: "" },
+};
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -70,6 +79,42 @@ const getPurchaseUrl = (book) => `https://www.amazon.com.br/s?k=${encodeURICompo
 function announce(message) {
   const live = $("#live-message");
   if (live) live.textContent = message;
+}
+
+function syncAccountNav() {
+  const control = $("[data-account-nav]");
+  if (!control) return;
+  control.textContent = state.account.user ? "Minha conta" : "Entrar / criar conta";
+}
+
+async function refreshAccountData() {
+  const user = state.account.user;
+  if (!user || !readingAccounts.accountsConfigured) return;
+  state.account.loading = true;
+  renderAccount();
+  try {
+    const data = await readingAccounts.loadReadingData(user.id);
+    state.account.profile = data.profile;
+    state.account.feedback = data.feedback;
+    state.account.message = "";
+  } catch (error) {
+    state.account.message = error.message || "Não foi possível carregar seus dados.";
+  } finally {
+    state.account.loading = false;
+    if (state.view === "account") renderAccount();
+  }
+}
+
+function handleAuthChange(user, event) {
+  state.account.user = user;
+  state.account.profile = null;
+  state.account.feedback = [];
+  if (event === "PASSWORD_RECOVERY") state.account.mode = "update-password";
+  state.account.loading = Boolean(user);
+  syncAccountNav();
+  if (user && state.account.mode !== "update-password") window.setTimeout(() => { if (state.account.user?.id === user.id) void refreshAccountData(); }, 0);
+  else if (user && state.view === "account") { state.account.loading = false; renderAccount(); }
+  else if (state.view === "account") renderAccount();
 }
 
 function switchView(view) {
@@ -87,7 +132,8 @@ function switchView(view) {
   $(".menu-toggle")?.setAttribute("aria-expanded", "false");
   if (view === "admin") renderAdmin();
   window.scrollTo({ top: 0, behavior: "smooth" });
-  const target = view === "quiz" ? $("#quiz-content") : view === "result" ? $("#result-content") : view === "admin" ? $("#admin-content") : $("#hero-title");
+  if (view === "account") renderAccount();
+  const target = view === "quiz" ? $("#quiz-content") : view === "result" ? $("#result-content") : view === "admin" ? $("#admin-content") : view === "account" ? $("#account-content") : $("#hero-title");
   if (view !== "home") window.setTimeout(() => target?.focus?.({ preventScroll: true }), 80);
 }
 
@@ -128,7 +174,7 @@ function renderQuiz() {
       <div class="quiz-intro-copy"><p class="eyebrow">Seu mapa de leitura</p><h1 id="quiz-heading" tabindex="-1">Um pouco sobre<br><em>o seu jeito.</em></h1><p>São 12 escolhas para entender o que move sua leitura. Depois, algumas preferências ajudam a encontrar um livro para o seu momento.</p></div>
       <aside class="intro-note"><strong>Leva cerca de 4 minutos</strong><p>As 12 primeiras respostas compõem seu perfil. As demais orientam a indicação e não alteram a pontuação. O resultado é uma hipótese de preferência, não um diagnóstico.</p></aside>
     </div>
-    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que minhas respostas ficam salvas somente neste navegador e não são enviadas à equipe nem a um servidor nesta versão.</span></label>
+    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que as respostas ficam neste navegador. Se eu criar uma conta, poderei escolher salvar meu perfil para personalizar as indicações.</span></label>
     <div class="begin-wrap"><button class="button button-primary" id="begin-mapping" type="button" disabled>Começar as perguntas <span aria-hidden="true">↗</span></button></div>`;
     $("#consent-check", content)?.addEventListener("change", (event) => { $("#begin-mapping", content).disabled = !event.target.checked; });
     $("#begin-mapping", content)?.addEventListener("click", () => { state.step = 0; renderQuiz(); window.scrollTo({ top: 0, behavior: "smooth" }); $("#quiz-heading")?.focus({ preventScroll: true }); });
@@ -180,18 +226,20 @@ function getAvoidList(text) {
   return topics.filter((topic) => normalized.includes(topic));
 }
 
-function chooseBooks(answers, ranking) {
+function chooseBooks(answers, ranking, feedback = []) {
   const leaders = ranking.leaders.map((profile) => profile.key);
   const secondary = ranking.secondary.map((profile) => profile.key);
   const activeProfiles = leaders.length ? leaders : ranking.ranking.slice(0, 2).map((profile) => profile.key);
   const selectedGenres = (answers.q13 || []).map(normalize);
+  const feedbackByBook = new Map(feedback.map(({ book_id, status }) => [book_id, status]));
   const preferredLength = answers.q14;
   const avoided = getAvoidList(answers.q17);
-  const safeBooks = BOOKS.filter((book) => !book.alerts.some((alert) => avoided.includes(normalize(alert))));
+  const safeBooks = BOOKS.filter((book) => !["read", "skip"].includes(feedbackByBook.get(book.id)) && !book.alerts.some((alert) => avoided.includes(normalize(alert))));
   const rankedBooks = safeBooks.map((book) => {
     let score = book.profiles.some((key) => activeProfiles.includes(key)) ? 7 : 0;
     score += book.profiles.filter((key) => secondary.includes(key)).length * 1.4;
     score += book.genres.filter((genre) => selectedGenres.includes(normalize(genre))).length * 3;
+    if (feedbackByBook.get(book.id) === "want") score += 4;
     if (preferredLength && preferredLength !== "sem-preferencia" && book.length === preferredLength) score += 2;
     if (answers.q19 === "Quero ser surpreendido" && book.id === "guia-galaxias") score += 0.5;
     return { book, score };
@@ -215,7 +263,28 @@ function saveRecord(record) {
   } catch { return false; }
 }
 
-function completeQuiz() {
+function profilePayload(record, user) {
+  return {
+    user_id: user.id,
+    display_name: String(user.user_metadata?.display_name || user.email?.split("@")[0] || "Leitor").slice(0, 120),
+    answers: record.answers,
+    profile_scores: record.scores,
+    profile_leaders: record.leaders,
+    preferred_genres: record.answers.q13 || [],
+    avoided_topics: String(record.answers.q17 || "").slice(0, 500),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function saveProfileToAccount(record) {
+  const user = state.account.user;
+  if (!user || !readingAccounts.accountsConfigured) return false;
+  state.account.profile = await readingAccounts.saveReadingProfile(profilePayload(record, user));
+  await refreshAccountData();
+  return true;
+}
+
+async function completeQuiz() {
   const scores = getScores(state.answers);
   const ranking = getRanking(scores);
   const { picks, avoided } = chooseBooks(state.answers, ranking);
@@ -233,7 +302,16 @@ function completeQuiz() {
   const isSaved = saveRecord(record);
   renderReport(state.report);
   switchView("result");
-  announce(isSaved ? "Seu relatório está pronto e foi salvo neste navegador." : "Seu relatório está pronto. Não foi possível salvar os dados neste navegador.");
+  if (isSaved && state.account.user && readingAccounts.accountsConfigured) {
+    try {
+      await saveProfileToAccount(record);
+      announce("Seu perfil foi salvo nesta conta e já pode orientar as próximas indicações.");
+    } catch {
+      announce("Seu relatório está salvo neste navegador, mas não foi possível sincronizar com a conta.");
+    }
+  } else {
+    announce(isSaved ? "Seu relatório está pronto e foi salvo neste navegador." : "Seu relatório está pronto. Não foi possível salvar os dados neste navegador.");
+  }
 }
 
 function pageLabel(value) {
@@ -258,6 +336,60 @@ function renderBookFeature(book, index = 0) {
       ${isMain ? `<p>${escapeHTML(book.summary)} ${escapeHTML(book.note)}</p><div class="book-meta"><span>${escapeHTML(bookLength)}</span>${book.genres.slice(0, 2).map((genre) => `<span>${escapeHTML(genre)}</span>`).join("")}</div>${book.alerts.length ? `<p class="content-note">Temas presentes na obra: ${escapeHTML(book.alerts.join(", "))}.</p>` : ""}${purchaseLink}` : purchaseLink}
     </div>
   </article>`;
+}
+
+function renderAccount() {
+  const content = $("#account-content");
+  if (!content) return;
+  const account = state.account;
+  if (account.loading) {
+    content.innerHTML = `<div class="account-loading" role="status">Carregando seu espaço de leitura…</div>`;
+    return;
+  }
+  if (account.user && account.mode === "update-password") {
+    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Escolha uma nova senha.</h1><p>Depois de salvar, você volta ao seu perfil de leitura.</p></div><form class="account-auth-form" id="account-password-form"><h2>Atualizar senha</h2><label>Nova senha<input name="password" type="password" minlength="8" autocomplete="new-password" required><small>Use pelo menos 8 caracteres.</small></label><label>Confirme a nova senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit">Salvar nova senha</button></form></div>`;
+    return;
+  }
+  if (!account.user) {
+    const mode = account.mode;
+    const signup = mode === "signup";
+    const reset = mode === "reset";
+    const previewOnly = !readingAccounts.accountsConfigured;
+    const title = signup ? "Crie seu espaço de leitura." : reset ? "Recupere o acesso." : "Volte às suas histórias.";
+    const submitLabel = signup ? "Criar conta" : reset ? "Enviar link de recuperação" : "Entrar na minha conta";
+    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu mapa e suas escolhas ficam guardados na conta. A curadoria aprende com seus gêneros e com os livros que você salva ou descarta." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div></div>
+      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">Prévia visual: conecte o Supabase para ativar cadastro e entrada.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="8" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 8 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Concordo em salvar minhas respostas e preferências nesta conta para personalizar indicações. Posso mudar ou apagar esses dados.</span></label>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
+    return;
+  }
+
+  const user = account.user;
+  const profile = account.profile;
+  const readerName = profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "leitor";
+  const latestLocal = state.report || getRecords()[0] || null;
+  const feedbackText = escapeHTML(account.message);
+  if (!profile) {
+    content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Seu perfil de leitura ainda não está salvo nesta conta. Faça o questionário ou traga o último resultado guardado neste navegador.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header><p class="account-form-message" role="status">${feedbackText}</p><div class="account-empty"><span aria-hidden="true">✳</span><h2>Vamos encontrar sua próxima leitura?</h2><p>Responda às perguntas para começar. Você pode mudar de estilo e de gênero depois.</p><div class="account-empty-actions"><button class="button button-primary" type="button" data-action="start-quiz">Fazer meu mapa <span aria-hidden="true">↗</span></button>${latestLocal ? `<button class="button button-outline" type="button" data-action="account-import-latest">Salvar o último resultado deste navegador</button>` : ""}</div></div>`;
+    return;
+  }
+
+  const preferredGenres = profile.preferred_genres?.length ? profile.preferred_genres : (profile.answers?.q13 || []);
+  const answers = { ...(profile.answers || {}), q13: preferredGenres, q17: profile.avoided_topics || "" };
+  const ranking = getRanking(profile.profile_scores || getScores(answers));
+  const { picks } = chooseBooks(answers, ranking, account.feedback);
+  const favoriteLabels = preferredGenres.length ? preferredGenres.join(", ") : "Aberto a novas descobertas";
+  const genres = PREFERENCE_QUESTIONS.find((question) => question.id === "q13")?.options || [];
+  const knownLeaders = (profile.profile_leaders || []).map(getProfile).filter(Boolean);
+  const scoreSummary = PROFILES.map((item) => `<li><span>${escapeHTML(item.name)}</span><strong>${Number(profile.profile_scores?.[item.key] || 0)} / 12</strong></li>`).join("");
+  const recommendations = picks.length ? picks.map((book, index) => {
+    const status = account.feedback.find((item) => item.book_id === book.id)?.status;
+    return `<div class="account-recommendation">${renderBookFeature(book, index)}<div class="account-feedback" aria-label="Sua opinião sobre ${escapeHTML(book.title)}"><button type="button" data-action="book-feedback" data-book-id="${escapeHTML(book.id)}" data-status="want" aria-pressed="${status === "want"}">${status === "want" ? "Salvo para ler" : "Quero ler"}</button><button type="button" data-action="book-feedback" data-book-id="${escapeHTML(book.id)}" data-status="read" aria-pressed="${status === "read"}">${status === "read" ? "Marcado como lido" : "Já li"}</button><button type="button" data-action="book-feedback" data-book-id="${escapeHTML(book.id)}" data-status="skip" aria-pressed="${status === "skip"}">${status === "skip" ? "Não recomendar" : "Não é meu estilo"}</button></div></div>`;
+  }).join("") : `<div class="recommendation-empty">Você já avaliou os títulos deste catálogo. Mude seus gêneros preferidos ou atualize o mapa para abrir novas possibilidades.</div>`;
+  content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Este mapa é seu ponto de partida. As próximas indicações mudam conforme seus gêneros e escolhas.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header>
+    <p class="account-form-message" role="status">${feedbackText}</p>
+    <div class="account-dashboard"><section class="account-column account-preferences"><article class="account-profile-card"><p class="eyebrow">Seu mapa de leitura</p><h2>${escapeHTML(profileHeadline(knownLeaders))}</h2><p>Gêneros: ${escapeHTML(favoriteLabels)}</p><ul class="account-score-list">${scoreSummary}</ul></article>
+      <form class="account-preferences-form" id="account-preferences-form"><h2>O que você quer ler agora?</h2><p>Marque ou desmarque gêneros. A próxima lista vai acompanhar sua escolha.</p><fieldset><legend>Gêneros preferidos</legend><div class="account-genre-list">${genres.map((genre) => `<label><input type="checkbox" name="genres" value="${escapeHTML(genre)}" ${preferredGenres.includes(genre) ? "checked" : ""}><span>${escapeHTML(genre)}</span></label>`).join("")}</div></fieldset><label class="account-avoid-label">Temas que você prefere evitar<textarea name="avoidedTopics" maxlength="500" placeholder="Ex.: violência, luto…">${escapeHTML(profile.avoided_topics || "")}</textarea></label><button class="button button-primary" type="submit">Salvar preferências</button></form>
+      <div class="account-data-actions"><button class="text-button" type="button" data-action="account-delete-reading-data">Apagar dados de leitura salvos nesta conta</button><small>Isso não encerra sua conta nem apaga os dados que continuam neste navegador.</small></div></section>
+      <section class="account-column account-recommendations"><div class="account-recommendation-heading"><div><p class="eyebrow">Sua próxima parada</p><h2>Livros que combinam com você</h2></div><p>Gêneros, temas e seus sinais de interesse ajustam a ordem a cada visita.</p></div><div class="account-recommendation-list">${recommendations}</div><button class="button button-outline account-retake" type="button" data-action="start-quiz">Atualizar meu mapa</button></section></div>`;
 }
 
 function renderReport(report) {
@@ -294,7 +426,7 @@ function renderReport(report) {
     <section class="report-context"><div><p class="eyebrow">O QUE VOCÊ GOSTA DE LER</p><h3>Seus interesses</h3><p>${escapeHTML(prefs)}</p><p style="margin-top:9px">${escapeHTML(pageLabel(report.answers.q14))} · ${escapeHTML(report.answers.q16 || "Tempo flexível")}</p></div><div><p class="eyebrow">PARA ESTA PRÓXIMA LEITURA</p><h3>O que você procura</h3><p>${escapeHTML(moment)}</p><p style="margin-top:9px"><strong>Temas para evitar:</strong> ${escapeHTML(excluded)}</p><p style="margin-top:9px"><strong>Formato:</strong> ${escapeHTML(report.answers.q22 || "Sem preferência")} · <strong>Investimento:</strong> ${escapeHTML(report.answers.q21 || "Ainda não definido")}</p></div></section>
     <blockquote class="report-quote">“${escapeHTML(quote)}”</blockquote>
     <p class="report-method"><strong>Como ler este resultado:</strong> este mapa descreve preferências de leitura e não é um teste psicológico, diagnóstico ou avaliação de personalidade. É uma hipótese exploratória, que pode mudar com suas experiências.</p>
-    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
+    <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${state.account.user ? "" : `<button class="button button-outline" type="button" data-action="open-account">Criar conta para salvar meu perfil</button>`}${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
 }
 
 function formatDate(iso) {
@@ -403,6 +535,29 @@ document.addEventListener("click", (event) => {
   if (!actionTarget) return;
   const action = actionTarget.dataset.action;
   if (action === "start-quiz") startQuiz();
+  else if (action === "open-account") switchView("account");
+  else if (action === "account-mode") { state.account.mode = actionTarget.dataset.mode; state.account.message = ""; renderAccount(); }
+  else if (action === "account-sign-out") readingAccounts.signOut().catch((error) => { state.account.message = error.message || "Não foi possível sair da conta."; renderAccount(); });
+  else if (action === "account-import-latest") {
+    const latestRecord = state.report || getRecords()[0];
+    if (latestRecord && window.confirm("Salvar as respostas do último resultado deste navegador nesta conta?")) {
+      saveProfileToAccount(latestRecord).then(() => { state.account.message = "Seu perfil foi salvo nesta conta."; renderAccount(); }).catch((error) => { state.account.message = error.message || "Não foi possível salvar esse perfil."; renderAccount(); });
+    }
+  } else if (action === "account-delete-reading-data") {
+    if (window.confirm("Apagar desta conta seu perfil e suas escolhas sobre livros? Esta ação não encerra a conta e não apaga os dados deste navegador.")) {
+      readingAccounts.deleteReadingData(state.account.user.id).then(() => {
+        state.account.profile = null;
+        state.account.feedback = [];
+        state.account.message = "Os dados de leitura desta conta foram apagados.";
+        renderAccount();
+      }).catch((error) => { state.account.message = error.message || "Não foi possível apagar os dados."; renderAccount(); });
+    }
+  } else if (action === "book-feedback") {
+    readingAccounts.saveBookFeedback({ userId: state.account.user.id, bookId: actionTarget.dataset.bookId, status: actionTarget.dataset.status }).then(() => refreshAccountData()).catch((error) => {
+      state.account.message = error.message || "Não foi possível guardar essa escolha.";
+      renderAccount();
+    });
+  }
   else if (action === "print-report") window.print();
   else if (action === "restart-quiz") startQuiz();
   else if (action === "open-admin" && LOCAL_ADMIN_ENABLED) switchView("admin");
@@ -426,12 +581,109 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener("submit", async (event) => {
+  const authForm = event.target.closest("#account-auth-form");
+  if (authForm) {
+    event.preventDefault();
+    const formData = new FormData(authForm);
+    const mode = authForm.dataset.mode;
+    const email = String(formData.get("email") || "").trim();
+    const submitButton = $("button[type=submit]", authForm);
+    submitButton.disabled = true;
+    state.account.message = "";
+    try {
+      if (mode === "signup") {
+        const password = String(formData.get("password") || "");
+        if (password !== formData.get("passwordConfirm")) throw new Error("As senhas não são iguais.");
+        if (!formData.get("consent")) throw new Error("Marque a autorização para salvar e personalizar seu perfil.");
+        const { data, error } = await readingAccounts.createAccount({ displayName: String(formData.get("displayName") || "").trim(), email, password });
+        if (error) throw error;
+        if (data.session?.user) {
+          handleAuthChange(data.session.user);
+          state.account.message = "Conta criada. Seu perfil já pode ser salvo nesta conta.";
+          if (state.report) await saveProfileToAccount(state.report);
+        } else {
+          state.account.message = "Conta criada. Confirme seu e-mail pelo link enviado para entrar e salvar seu perfil.";
+        }
+      } else if (mode === "reset") {
+        const { error } = await readingAccounts.sendPasswordReset(email);
+        if (error) throw error;
+        state.account.message = "Se houver uma conta para esse e-mail, enviaremos um link para redefinir a senha.";
+      } else {
+        const { data, error } = await readingAccounts.signIn({ email, password: String(formData.get("password") || "") });
+        if (error) throw error;
+        handleAuthChange(data.user);
+        state.account.message = "Entrada concluída.";
+      }
+    } catch (error) {
+      state.account.message = error.message || "Não foi possível concluir essa etapa.";
+    } finally {
+      if (authForm.isConnected) submitButton.disabled = false;
+      renderAccount();
+    }
+    return;
+  }
+
+  const passwordForm = event.target.closest("#account-password-form");
+  if (passwordForm) {
+    event.preventDefault();
+    const formData = new FormData(passwordForm);
+    const password = String(formData.get("password") || "");
+    if (password !== formData.get("passwordConfirm")) {
+      state.account.message = "As senhas não são iguais.";
+      renderAccount();
+      return;
+    }
+    try {
+      await readingAccounts.updatePassword(password);
+      state.account.mode = "login";
+      state.account.message = "Senha atualizada.";
+      await refreshAccountData();
+    } catch (error) {
+      state.account.message = error.message || "Não foi possível atualizar a senha.";
+      renderAccount();
+    }
+    return;
+  }
+
+  const preferencesForm = event.target.closest("#account-preferences-form");
+  if (preferencesForm) {
+    event.preventDefault();
+    const formData = new FormData(preferencesForm);
+    const preferredGenres = formData.getAll("genres").map(String);
+    const avoidedTopics = String(formData.get("avoidedTopics") || "").trim().slice(0, 500);
+    const profile = state.account.profile;
+    try {
+      state.account.profile = await readingAccounts.saveReadingProfile({
+        user_id: state.account.user.id,
+        display_name: profile.display_name,
+        answers: { ...(profile.answers || {}), q13: preferredGenres, q17: avoidedTopics },
+        profile_scores: profile.profile_scores,
+        profile_leaders: profile.profile_leaders,
+        preferred_genres: preferredGenres,
+        avoided_topics: avoidedTopics,
+        updated_at: new Date().toISOString(),
+      });
+      state.account.message = "Preferências salvas. Suas próximas sugestões já refletem essa mudança.";
+      await refreshAccountData();
+    } catch (error) {
+      state.account.message = error.message || "Não foi possível salvar suas preferências.";
+      renderAccount();
+    }
+  }
+});
+
 $(".menu-toggle")?.addEventListener("click", (event) => {
   const nav = $(".main-nav");
   const isOpen = nav.classList.toggle("is-open");
   event.currentTarget.setAttribute("aria-expanded", String(isOpen));
   event.currentTarget.setAttribute("aria-label", isOpen ? "Fechar navegação" : "Abrir navegação");
 });
+
+syncAccountNav();
+readingAccounts.subscribeToAuth(handleAuthChange);
+if (!readingAccounts.accountsConfigured) state.account.loading = false;
+if (new URLSearchParams(window.location.search).get("view") === "account") switchView("account");
 
 if (LOCAL_ADMIN_ENABLED) {
   $$('[data-local-admin]').forEach((control) => { control.hidden = false; });
