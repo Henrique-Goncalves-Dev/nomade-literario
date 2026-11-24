@@ -1,0 +1,26 @@
+Idioma detectado: português (100% de confiança).
+
+[000.5–003.5] Tá, que legal, o que que vai ser?
+[003.5–007.5] Eu estou participando de um curso aqui no Sobrae, chamado Empretec.
+[007.5–009.5] E a gente tem que criar uma empresa.
+[009.5–011.5] E qual é a empresa que eu vou criar?
+[011.5–014.5] A empresa que eu vou criar é, tipo, o Simone Food de Livros.
+[014.5–017.5] Então, basicamente, eu preciso de uma plataforma,
+[017.5–019.5] como forma de automatizar,
+[019.5–023.5] para fazer mapeamento de perfil de leitor.
+[023.5–029.5] Então, a pessoa vai criar um formulário com o perfil de leitor
+[029.5–031.5] e esse perfil, de acordo com o que ele marcar,
+[031.5–033.5] eu vou indicar qual é o perfil dele.
+[033.5–037.5] Então, sei lá, um perfil de leitor e mais nativo.
+[037.5–040.5] Então, provavelmente ele vai gostar de livros de fantasia e tudo mais,
+[040.5–042.5] e a indicação desse livro, por exemplo,
+[042.5–044.5] vai me chamar um relatóriozinho.
+[044.5–047.5] E a indicação desse livro já é crônica e dinâmica.
+[047.5–050.5] Aí ele vai receber na casa dele esse crônica e dinâmica, entendeu?
+[050.5–053.5] Só que eu preciso de alguma forma para me automatizar.
+[053.5–057.5] Tanto para que ele recebe esse relatório,
+[057.5–062.5] quanto também para que eu consiga fazer essa interligação
+[062.5–066.5] entre a resposta e tudo com o perfil, entendeu?
+[066.5–069.5] E a missão desse relatório de forma mais simples,
+[069.5–070.5] porque, entendeu?
+[070.5–075.5] É isso que eu preciso para, tipo, amanhã, entendeu?
