@@ -1,6 +1,10 @@
 import * as readingAccounts from "./account.js";
 
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || "";
+const ACCESS_PRICE_BRL = Number(import.meta.env.VITE_ACCESS_PRICE_BRL || 0);
+const PAYMENT_PIX_KEY = import.meta.env.VITE_PAYMENT_PIX_KEY?.trim() || "";
+const PAYMENT_RECIPIENT = import.meta.env.VITE_PAYMENT_RECIPIENT?.trim() || "";
+const PAYMENT_CONFIGURED = Number.isFinite(ACCESS_PRICE_BRL) && ACCESS_PRICE_BRL > 0 && Boolean(PAYMENT_PIX_KEY && PAYMENT_RECIPIENT);
 let turnstileScriptPromise;
 const PROFILE_LETTERS = { A: "explorador", B: "imersivo", C: "investigador", D: "contemplativo" };
 const PROFILES = [
@@ -69,7 +73,7 @@ const state = {
   answers: {},
   report: null,
   selectedRecord: null,
-  account: { user: null, profile: null, contactProfile: null, feedback: [], loading: readingAccounts.accountsConfigured, mode: "login", message: "", captchaToken: "", captchaWidgetId: null },
+  account: { user: null, profile: null, contactProfile: null, feedback: [], hasPaidAccess: false, latestPayment: null, isPlatformAdmin: false, groupSettings: [], adminMessage: "", pendingEmail: "", resendingConfirmation: false, loading: readingAccounts.accountsConfigured, mode: "login", message: "", captchaToken: "", captchaWidgetId: null },
 };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -146,8 +150,9 @@ function mountTurnstile() {
 
 function syncAccountNav() {
   const control = $("[data-account-nav]");
-  if (!control) return;
-  control.textContent = state.account.user ? "Minha conta" : "Entrar / criar conta";
+  if (control) control.textContent = state.account.user ? "Minha conta" : "Entrar / criar conta";
+  const adminControl = $("[data-platform-admin]");
+  if (adminControl) adminControl.hidden = !state.account.isPlatformAdmin;
 }
 
 async function refreshAccountData() {
@@ -160,12 +165,20 @@ async function refreshAccountData() {
     state.account.profile = data.profile;
     state.account.contactProfile = data.contactProfile;
     state.account.feedback = data.feedback;
+    state.account.hasPaidAccess = data.hasPaidAccess;
+    state.account.latestPayment = data.latestPayment;
+    state.account.isPlatformAdmin = data.isPlatformAdmin;
+    state.account.groupSettings = data.groupSettings;
     state.account.message = "";
   } catch {
     state.account.message = "Não foi possível carregar os dados da sua conta. Tente novamente.";
+    state.account.isPlatformAdmin = false;
+    state.account.groupSettings = [];
   } finally {
     state.account.loading = false;
+    syncAccountNav();
     if (state.view === "account") renderAccount();
+    if (state.view === "admin") renderAdmin();
   }
 }
 
@@ -174,6 +187,19 @@ function handleAuthChange(user, event) {
   state.account.profile = null;
   state.account.contactProfile = null;
   state.account.feedback = [];
+  state.account.hasPaidAccess = false;
+  state.account.latestPayment = null;
+  state.account.isPlatformAdmin = false;
+  state.account.groupSettings = [];
+  state.account.adminMessage = "";
+  if (event === "SIGNED_IN" && user) {
+    state.account.pendingEmail = "";
+    if (state.view === "home") {
+      state.account.mode = "login";
+      state.account.message = "Sua conta foi confirmada. Continue para a etapa de pagamento.";
+      switchView("account");
+    }
+  }
   if (event === "PASSWORD_RECOVERY" && user) {
     state.account.mode = "update-password";
     state.account.loading = false;
@@ -189,9 +215,9 @@ function handleAuthChange(user, event) {
 }
 
 function switchView(view) {
-  if (view === "admin" && !LOCAL_ADMIN_ENABLED) {
+  if (view === "admin" && !LOCAL_ADMIN_ENABLED && !state.account.isPlatformAdmin) {
     view = "home";
-    announce("O painel local não está disponível na versão pública.");
+    announce("A área de administração exige uma conta autorizada.");
   }
   state.view = view;
   $$(".screen").forEach((screen) => {
@@ -209,6 +235,26 @@ function switchView(view) {
 }
 
 function startQuiz() {
+  if (!readingAccounts.accountsConfigured) {
+    state.account.mode = "signup";
+    state.account.message = "Crie uma conta para seguir para a etapa de pagamento.";
+    switchView("account");
+    return;
+  }
+  if (!state.account.user) {
+    state.account.mode = "signup";
+    state.account.message = "Entre ou crie uma conta para liberar seu mapa de leitura.";
+    switchView("account");
+    return;
+  }
+  if (state.account.loading || !state.account.hasPaidAccess) {
+    state.account.mode = "login";
+    switchView("account");
+    announce(state.account.loading
+      ? "Estou conferindo o status da sua conta."
+      : "O questionário será liberado depois que a equipe confirmar seu pagamento.");
+    return;
+  }
   state.step = -1;
   state.answers = {};
   renderQuiz();
@@ -245,7 +291,7 @@ function renderQuiz() {
       <div class="quiz-intro-copy"><p class="eyebrow">Seu mapa de leitura</p><h1 id="quiz-heading" tabindex="-1">Um pouco sobre<br><em>o seu jeito.</em></h1><p>São 12 escolhas para entender o que move sua leitura. Depois, algumas preferências ajudam a encontrar um livro para o seu momento.</p></div>
       <aside class="intro-note"><strong>Leva cerca de 4 minutos</strong><p>As 12 primeiras respostas compõem seu perfil. As demais orientam a indicação e não alteram a pontuação. O resultado é uma hipótese de preferência, não um diagnóstico.</p></aside>
     </div>
-    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que as respostas ficam neste navegador. Se eu criar uma conta, poderei escolher salvar meu perfil para personalizar as indicações.</span></label>
+    <label class="consent-row"><input id="consent-check" type="checkbox"><span>Entendi que preciso entrar em uma conta com acesso aprovado para responder. As respostas e preferências ficam salvas no meu perfil para montar o relatório e personalizar as indicações.</span></label>
     <div class="begin-wrap"><button class="button button-primary" id="begin-mapping" type="button" disabled>Começar as perguntas <span aria-hidden="true">↗</span></button></div>`;
     $("#consent-check", content)?.addEventListener("change", (event) => { $("#begin-mapping", content).disabled = !event.target.checked; });
     $("#begin-mapping", content)?.addEventListener("click", () => { state.step = 0; renderQuiz(); window.scrollTo({ top: 0, behavior: "smooth" }); $("#quiz-heading")?.focus({ preventScroll: true }); });
@@ -385,6 +431,10 @@ function updateSavedRecommendation(report) {
 }
 
 async function completeQuiz() {
+  if (!state.account.user || !state.account.hasPaidAccess) {
+    startQuiz();
+    return;
+  }
   const scores = getScores(state.answers);
   const ranking = getRanking(scores);
   const { picks, avoided } = chooseBooks(state.answers, ranking, state.account.feedback);
@@ -453,7 +503,7 @@ function renderContactProfileForm(profile, user) {
     <label>Nome<input name="displayName" type="text" maxlength="120" autocomplete="name" value="${escapeHTML(saved.display_name || user.user_metadata?.display_name || "")}" required></label>
     <label>Faixa etária (opcional)<select name="ageRange"><option value="">Prefiro não informar</option>${ageOptions}</select></label>
     <details class="account-privacy-details"><summary>Como usamos esses dados</summary><p>Seu nome e a faixa etária escolhida compõem seu perfil. Celular e endereço só são solicitados e guardados se você demonstrar interesse em entrega. Esta tela não confirma disponibilidade, cria pedido ou realiza cobrança. Você pode baixar uma cópia e apagar os dados do perfil e da leitura pela sua conta.</p></details>
-    ${!isEditing ? `<label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Confirmo que tenho 18 anos ou mais. Menores podem responder ao questionário sem criar conta.</span></label><label class="account-consent"><input name="dataConsent" type="checkbox" required><span>Li o aviso acima e concordo em salvar estes dados na minha conta.</span></label>` : ""}
+    ${!isEditing ? `<label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Confirmo que tenho 18 anos ou mais.</span></label><label class="account-consent"><input name="dataConsent" type="checkbox" required><span>Li o aviso acima e concordo em salvar estes dados na minha conta.</span></label>` : ""}
     <fieldset class="account-delivery-choice"><legend>Receber livros em casa</legend><label class="account-consent"><input name="deliveryInterest" type="checkbox" ${delivery ? "checked" : ""}><span>Tenho interesse em receber livros em casa quando essa opção estiver disponível.</span></label><p>Marcar esta opção registra seu interesse, mas não cria pedido nem garante que a entrega esteja disponível.</p></fieldset>
     <div class="account-delivery-fields" data-delivery-fields ${delivery ? "" : "hidden"}>
       <label>Celular com DDD<input name="phone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="(11) 99999-9999" value="${escapeHTML(saved.phone || "")}" ${delivery ? "required" : ""} data-delivery-required></label>
@@ -467,6 +517,71 @@ function renderContactProfileForm(profile, user) {
     <p class="account-data-notice">Usamos nome e faixa etária para administrar seu perfil. Celular e endereço só são salvos quando você demonstra interesse em entrega. Você pode editar ou apagar esses dados nesta conta.</p>
     <button class="button button-primary" type="submit">Salvar meus dados</button>
   </form>`;
+}
+
+function renderPaymentAccessPanel(account) {
+  if (account.hasPaidAccess) return "";
+  const payment = account.latestPayment;
+  const isPending = payment?.status === "pending_review";
+  const isRejected = payment?.status === "rejected";
+  const isExpired = payment?.status === "approved" && payment.access_expires_at && new Date(payment.access_expires_at) <= new Date();
+  const title = isPending ? "Comprovante em análise" : isExpired ? "Seu acesso expirou" : isRejected ? "Envie outro comprovante" : "Libere seu mapa de leitura";
+  const explanation = isPending
+    ? "A equipe está conferindo o pagamento. O mapa será liberado quando a revisão terminar."
+    : isExpired
+      ? "O período de acesso anterior terminou. Faça um novo pagamento para continuar."
+      : isRejected
+        ? "A equipe não conseguiu confirmar o pagamento. Confira os dados e envie um novo comprovante."
+        : "Entre na sua conta, faça o pagamento e envie o comprovante. A equipe confirma o recebimento antes de abrir o questionário.";
+  const amount = PAYMENT_CONFIGURED ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(ACCESS_PRICE_BRL) : "";
+  const statusBlock = isPending
+    ? `<div class="account-payment-status" role="status"><strong>Aguardando conferência</strong><p>Você pode voltar a esta página e atualizar o status. O arquivo enviado fica em uma área privada.</p><button class="button button-outline button-small" type="button" data-action="refresh-payment-status">Atualizar status</button></div>`
+    : !PAYMENT_CONFIGURED
+      ? `<div class="account-payment-status" role="status"><strong>Pagamento ainda não configurado</strong><p>O valor, os dados Pix e o período de acesso serão publicados aqui quando estiverem definidos. Ainda não envie comprovantes por outros canais.</p></div>`
+      : `<div class="account-payment-instructions"><p class="eyebrow">Pagamento via Pix</p><dl><div><dt>Valor</dt><dd>${escapeHTML(amount)}</dd></div><div><dt>Recebedor</dt><dd>${escapeHTML(PAYMENT_RECIPIENT)}</dd></div></dl><div class="account-pix-key"><span>Chave Pix</span><code>${escapeHTML(PAYMENT_PIX_KEY)}</code><button class="text-button" type="button" data-action="copy-pix-key">Copiar chave</button></div><form class="account-payment-form" id="payment-proof-form"><label>Comprovante <span>PDF, JPG, PNG ou WebP · até 5 MB</span><input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required></label><label class="account-consent"><input name="receiptConsent" type="checkbox" required><span>Autorizo guardar este comprovante em área privada para conferência do pagamento. O envio ainda não libera o acesso.</span></label><button class="button button-primary" type="submit">Enviar para conferência</button></form></div>`;
+
+  return `<section class="account-access-panel" id="payment-access" aria-labelledby="payment-access-title"><div class="account-access-copy"><p class="eyebrow">Acesso à plataforma</p><h2 id="payment-access-title">${title}</h2><p>${explanation}</p>${isRejected && payment.reviewed_at ? `<p class="account-payment-date">Revisão em ${escapeHTML(formatDate(payment.reviewed_at))}</p>` : ""}</div>${statusBlock}</section>`;
+}
+
+function renderWhatsAppGroups(profiles) {
+  const cards = profiles.map((profile) => {
+    const configuredLink = (state.account.groupSettings || []).find((setting) => setting.profile_key === profile.key)?.invite_url || "";
+    let groupLink = "";
+    try {
+      const parsed = new URL(configuredLink);
+      if (parsed.protocol === "https:" && parsed.hostname === "chat.whatsapp.com") groupLink = parsed.href;
+    } catch { /* Convites ausentes ou inválidos ficam sem link até a equipe configurar. */ }
+    return `<article class="reader-group-card"><div><p class="eyebrow">Ponto de encontro</p><h3>Grupo ${escapeHTML(profile.name)}</h3><p>${groupLink ? "Converse com leitores que compartilham este perfil." : "O convite será disponibilizado assim que o grupo estiver pronto."}</p></div>${groupLink ? `<a class="button button-outline button-small" href="${escapeHTML(groupLink)}" target="_blank" rel="noopener noreferrer">Entrar no WhatsApp</a>` : `<span class="reader-group-soon">Convite em breve</span>`}</article>`;
+  }).join("");
+  if (!cards) return "";
+  return `<section class="reader-group-section" aria-labelledby="reader-group-title"><div class="reader-group-heading"><p class="eyebrow">Depois do seu mapa</p><h2 id="reader-group-title">Continue a conversa</h2><p>Seu perfil indica o grupo de leitores que combina com este resultado.</p></div><div class="reader-group-list">${cards}</div></section>`;
+}
+
+function renderGroupSettingsPanel() {
+  if (!state.account.isPlatformAdmin) return "";
+  const settings = new Map((state.account.groupSettings || []).map((item) => [item.profile_key, item]));
+  return `<section class="group-settings-panel" aria-labelledby="group-settings-title">
+    <div class="group-settings-heading"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h2 id="group-settings-title">Convites dos grupos</h2><p>Atualize os links exibidos no relatório de cada perfil. Um campo vazio mantém o convite como “em breve”.</p></div><span class="admin-access-badge">Conta autorizada</span></div>
+    <form id="admin-group-links-form">
+      <div class="group-settings-fields">${PROFILES.map((profile) => `<label for="group-link-${profile.key}"><span>Perfil ${escapeHTML(profile.name)}</span><input id="group-link-${profile.key}" name="${profile.key}" type="url" maxlength="500" autocomplete="url" placeholder="https://chat.whatsapp.com/..." value="${escapeHTML(settings.get(profile.key)?.invite_url || "")}"><small>Convite do grupo ${escapeHTML(profile.name)}.</small></label>`).join("")}</div>
+      <div class="group-settings-submit"><p class="admin-group-message" role="status">${escapeHTML(state.account.adminMessage)}</p><button class="button button-primary" type="submit">Salvar convites</button></div>
+    </form>
+  </section>`;
+}
+
+function normalizeWhatsAppInvite(value) {
+  const input = String(value || "").trim();
+  if (!input) return null;
+  let invite;
+  try { invite = new URL(input); }
+  catch { throw new Error("Use um link de convite válido do WhatsApp."); }
+  const code = invite.pathname.replace(/^\/+|\/+$/g, "");
+  if (invite.protocol !== "https:" || invite.hostname !== "chat.whatsapp.com" || invite.username || invite.password
+    || !/^[A-Za-z0-9_-]{6,256}$/.test(code) || invite.hash || (invite.search && !/^\?(?:[A-Za-z0-9_=&%-]*)$/.test(invite.search))) {
+    throw new Error("Use um link https://chat.whatsapp.com/ válido.");
+  }
+  invite.pathname = `/${code}`;
+  return invite.href;
 }
 
 function renderAccount() {
@@ -484,13 +599,18 @@ function renderAccount() {
   }
   if (!account.user) {
     const mode = account.mode;
+    if (mode === "awaiting-confirmation") {
+      content.innerHTML = `<div class="account-confirmation-layout"><div class="account-intro"><p class="eyebrow">Mais um passo</p><h1 id="account-title" tabindex="-1">Confirme seu e-mail.</h1><p>Enviamos uma mensagem para confirmar que este endereço é seu. Depois de confirmar, entre na sua conta para continuar.</p></div><section class="account-confirmation-card" aria-labelledby="confirmation-title"><span class="confirmation-mark" aria-hidden="true">✉</span><h2 id="confirmation-title">Confira sua caixa de entrada</h2><p>O link de confirmação foi enviado para <strong>${escapeHTML(account.pendingEmail)}</strong>.</p><p>Se não encontrar a mensagem, confira o spam ou solicite outro link.</p>${TURNSTILE_SITE_KEY ? `<div class="account-turnstile" id="account-turnstile" aria-label="Verificação de segurança"></div>` : ""}<p class="account-confirmation-message account-form-message" role="status">${escapeHTML(account.message)}</p><div class="account-confirmation-actions"><button class="button button-primary" type="button" data-action="resend-confirmation" ${account.resendingConfirmation ? "disabled" : ""}>${account.resendingConfirmation ? "Enviando…" : "Reenviar confirmação"}</button><button class="text-button" type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button></div></section></div>`;
+      if (TURNSTILE_SITE_KEY) mountTurnstile();
+      return;
+    }
     const signup = mode === "signup";
     const reset = mode === "reset";
     const previewOnly = !readingAccounts.accountsConfigured;
     const title = signup ? "Crie seu espaço de leitura." : reset ? "Recupere o acesso." : "Volte às suas histórias.";
     const submitLabel = signup ? "Criar conta" : reset ? "Enviar link de recuperação" : "Entrar na minha conta";
-    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu perfil e suas escolhas ficam guardados na conta. Você pode mudar de gênero e receber indicações que acompanham seu momento." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div><p class="account-age-note">O cadastro é para maiores de 18 anos. O questionário pode ser respondido sem conta.</p></div>
-      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">A autenticação será ativada quando o projeto Supabase do Nômade Literário estiver configurado.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="12" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 12 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="12" autocomplete="new-password" required></label><details class="account-privacy-details"><summary>Como os dados serão usados</summary><p>O e-mail cria e protege sua conta. As respostas e preferências ficam vinculadas ao seu perfil para personalizar recomendações. Celular e endereço só serão solicitados se você demonstrar interesse em entrega. Você pode consultar, corrigir e apagar os dados salvos na sua conta.</p></details><label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Declaro que tenho 18 anos ou mais.</span></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Li o aviso acima e concordo em criar a conta e salvar minhas respostas e preferências.</span></label>` : ""}${TURNSTILE_SITE_KEY ? `<div class="account-turnstile" id="account-turnstile" aria-label="Verificação de segurança"></div>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly || TURNSTILE_SITE_KEY ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
+    content.innerHTML = `<div class="account-auth-layout"><div class="account-intro"><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">${title}</h1><p>${signup ? "Seu perfil e suas escolhas ficam guardados na conta. Você pode mudar de gênero e receber indicações que acompanham seu momento." : "Acesse seu perfil e continue descobrindo livros no seu ritmo."}</p><div class="account-auth-note"><span aria-hidden="true">✳</span><p>Você pode trocar de gênero, atualizar suas preferências e recomeçar seu mapa sempre que quiser.</p></div><p class="account-age-note">O cadastro e o questionário são para maiores de 18 anos. O questionário será liberado depois da aprovação do pagamento.</p></div>
+      <form class="account-auth-form" id="account-auth-form" data-mode="${escapeHTML(mode)}"><h2>${title}</h2>${previewOnly ? `<p class="account-preview-notice">A autenticação será ativada quando o projeto Supabase do Nômade Literário estiver configurado.</p>` : ""}${signup ? `<label>Como podemos chamar você?<input name="displayName" type="text" maxlength="120" autocomplete="name" required></label>` : ""}<label>E-mail<input name="email" type="email" autocomplete="email" value="${!signup ? escapeHTML(account.pendingEmail) : ""}" required></label>${reset ? "" : `<label>Senha<input name="password" type="password" minlength="12" autocomplete="${signup ? "new-password" : "current-password"}" required><small>Use pelo menos 12 caracteres.</small></label>`}${signup ? `<label>Confirme sua senha<input name="passwordConfirm" type="password" minlength="12" autocomplete="new-password" required></label><details class="account-privacy-details"><summary>Como os dados serão usados</summary><p>O e-mail cria e protege sua conta. As respostas e preferências ficam vinculadas ao seu perfil para personalizar recomendações. Celular e endereço só serão solicitados se você demonstrar interesse em entrega. Você pode consultar, corrigir e apagar os dados salvos na sua conta.</p></details><label class="account-consent"><input name="adultConfirmed" type="checkbox" required><span>Declaro que tenho 18 anos ou mais.</span></label><label class="account-consent"><input name="consent" type="checkbox" required><span>Li o aviso acima e concordo em criar a conta e salvar minhas respostas e preferências.</span></label>` : ""}${TURNSTILE_SITE_KEY ? `<div class="account-turnstile" id="account-turnstile" aria-label="Verificação de segurança"></div>` : ""}<p class="account-form-message" role="status">${escapeHTML(account.message)}</p><button class="button button-primary" type="submit" ${previewOnly || TURNSTILE_SITE_KEY ? "disabled" : ""}>${submitLabel}</button><div class="account-auth-switch">${signup ? `<button type="button" data-action="account-mode" data-mode="login">Já tenho conta</button>` : reset ? `<button type="button" data-action="account-mode" data-mode="login">Voltar para entrar</button>` : `<button type="button" data-action="account-mode" data-mode="signup">Criar uma conta</button><button type="button" data-action="account-mode" data-mode="reset">Esqueci minha senha</button>`}</div></form></div>`;
     mountTurnstile();
     return;
   }
@@ -499,12 +619,15 @@ function renderAccount() {
   const profile = account.profile;
   const contactProfile = account.contactProfile;
   const readerName = contactProfile?.display_name || profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "leitor";
-  const latestLocal = state.report || getRecords()[0] || null;
   const feedbackText = escapeHTML(account.message);
+  const paymentAccessPanel = renderPaymentAccessPanel(account);
   const contactEditor = `<details class="account-profile-details" ${contactProfile ? "" : "open"}><summary>Meus dados e entrega</summary>${renderContactProfileForm(contactProfile, user)}</details>`;
-  const dataActions = `<div class="account-data-actions"><button class="text-button" type="button" data-action="account-export-data">Baixar uma cópia dos meus dados</button><button class="text-button" type="button" data-action="account-delete-reading-data">Apagar meus dados de perfil e leitura</button><small>A exclusão remove nome, faixa etária, endereço, preferências e avaliações da conta, mas mantém o acesso por e-mail. Cópias salvas anteriormente neste navegador permanecem locais.</small></div>`;
+  const dataActions = `<div class="account-data-actions"><button class="text-button" type="button" data-action="account-export-data">Baixar uma cópia dos meus dados</button><button class="text-button" type="button" data-action="account-delete-reading-data">Apagar meus dados de perfil e leitura</button><small>A exclusão remove nome, faixa etária, endereço, preferências e avaliações da conta, mas mantém a conta por e-mail e os comprovantes de pagamento. Cópias salvas anteriormente neste navegador permanecem locais.</small></div>`;
   if (!profile) {
-    content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Complete seus dados se quiser entrega em casa e faça o questionário para salvar seu perfil de leitura.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header><p class="account-form-message" role="status">${feedbackText}</p>${contactEditor}<div class="account-empty"><span aria-hidden="true">✳</span><h2>Vamos encontrar sua próxima leitura?</h2><p>Responda às perguntas para começar. Você pode mudar de estilo e de gênero depois.</p><div class="account-empty-actions"><button class="button button-primary" type="button" data-action="start-quiz">Fazer meu mapa <span aria-hidden="true">↗</span></button>${latestLocal ? `<button class="button button-outline" type="button" data-action="account-import-latest">Salvar o último resultado deste navegador</button>` : ""}</div></div>${dataActions}`;
+    const paidReaderContent = account.hasPaidAccess
+      ? `${contactEditor}<div class="account-empty"><span aria-hidden="true">✳</span><h2>Vamos encontrar sua próxima leitura?</h2><p>Agora que o acesso foi confirmado, faça seu mapa. O resultado traz um relatório e o convite do grupo do seu perfil.</p><div class="account-empty-actions"><button class="button button-primary" type="button" data-action="start-quiz">Fazer meu mapa</button></div></div>${dataActions}`
+      : "";
+    content.innerHTML = `<header class="account-intro account-welcome"><div><p class="eyebrow">Seu espaço de leitura</p><h1 id="account-title" tabindex="-1">Olá, ${escapeHTML(readerName)}.</h1><p>Seu acesso começa aqui. Depois da confirmação do pagamento, o mapa de leitura será liberado nesta conta.</p></div><button class="button button-outline button-small" type="button" data-action="account-sign-out">Sair da conta</button></header><p class="account-form-message" role="status">${feedbackText}</p>${paymentAccessPanel}${paidReaderContent}`;
     return;
   }
 
@@ -543,6 +666,7 @@ function renderReport(report) {
   const excluded = String(report.answers.q17 || "").trim() || "Você não indicou temas para evitar.";
   const moment = String(report.answers.q18 || "").trim() || "Sem uma experiência específica por agora.";
   const quote = leaders.length > 1 ? "Você reúne mais de um jeito de ler. Use este mapa como ponto de partida, sem limitar as próximas descobertas." : leaders[0]?.short || "Seu mapa reúne diferentes maneiras de aproveitar uma história.";
+  const groupSection = state.account.hasPaidAccess ? renderWhatsAppGroups(leaders) : "";
   content.innerHTML = `<header class="result-header">
       <div><p class="eyebrow">Seu mapa está pronto</p><h1 id="report-title" tabindex="-1">Um caminho de<br><em>leitura para você.</em></h1></div>
       <div class="result-actions"><button class="button button-outline button-small" type="button" data-action="print-report">Salvar relatório em PDF</button>${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline button-small" type="button" data-action="open-admin">Ver painel piloto</button>` : ""}</div>
@@ -561,6 +685,7 @@ function renderReport(report) {
       <p class="field-hint">Indicação gerada a partir de um catálogo demonstrativo. Os títulos marcados como lidos ficam salvos neste navegador e não voltam às próximas sugestões.</p>
     </section>
     <section class="report-context"><div><p class="eyebrow">O QUE VOCÊ GOSTA DE LER</p><h3>Seus interesses</h3><p>${escapeHTML(prefs)}</p><p style="margin-top:9px">${escapeHTML(pageLabel(report.answers.q14))} · ${escapeHTML(report.answers.q16 || "Tempo flexível")}</p></div><div><p class="eyebrow">PARA ESTA PRÓXIMA LEITURA</p><h3>O que você procura</h3><p>${escapeHTML(moment)}</p><p style="margin-top:9px"><strong>Temas para evitar:</strong> ${escapeHTML(excluded)}</p><p style="margin-top:9px"><strong>Formato:</strong> ${escapeHTML(report.answers.q22 || "Sem preferência")} · <strong>Investimento:</strong> ${escapeHTML(report.answers.q21 || "Ainda não definido")}</p></div></section>
+    ${groupSection}
     <blockquote class="report-quote">“${escapeHTML(quote)}”</blockquote>
     <p class="report-method"><strong>Como ler este resultado:</strong> este mapa descreve preferências de leitura e não é um teste psicológico, diagnóstico ou avaliação de personalidade. É uma hipótese exploratória, que pode mudar com suas experiências.</p>
     <div class="result-bottom-actions"><button class="button button-primary" type="button" data-action="print-report">Imprimir ou salvar relatório em PDF <span aria-hidden="true">↗</span></button><button class="button button-outline" type="button" data-action="restart-quiz">Fazer outro mapa</button>${state.account.user ? "" : `<button class="button button-outline" type="button" data-action="open-signup">Criar conta para salvar meu perfil</button>`}${LOCAL_ADMIN_ENABLED ? `<button class="button button-outline" type="button" data-action="open-admin">Abrir painel de curadoria</button>` : ""}</div>`;
@@ -579,8 +704,13 @@ function recordProfileLabel(record) {
 function renderAdmin() {
   const content = $("#admin-content");
   if (!content) return;
+  if (!LOCAL_ADMIN_ENABLED && !state.account.isPlatformAdmin) {
+    content.innerHTML = `<div class="empty-state"><strong>Acesso restrito</strong>Entre em uma conta autorizada para abrir a administração.</div>`;
+    return;
+  }
+  const groupSettingsPanel = renderGroupSettingsPanel();
   if (!LOCAL_ADMIN_ENABLED) {
-    content.innerHTML = `<div class="empty-state"><strong>Painel indisponível</strong>O painel deste protótipo só funciona localmente e não reúne respostas de outros navegadores.</div>`;
+    content.innerHTML = `${groupSettingsPanel}<p class="admin-footnote">Os links ficam no banco e podem ser trocados sem publicar uma nova versão do site.</p>`;
     return;
   }
   const records = getRecords();
@@ -589,7 +719,7 @@ function renderAdmin() {
   const mostCommon = PROFILES.reduce((best, profile) => distribution[profile.key] > distribution[best.key] ? profile : best, PROFILES[0]);
   const mostCommonCount = distribution[mostCommon.key];
   const details = state.selectedRecord ? records.find((record) => record.id === state.selectedRecord) : null;
-  content.innerHTML = `<header class="admin-header"><div><p class="eyebrow">VISÃO DO TESTE PILOTO</p><h1 id="admin-title" tabindex="-1">Painel da curadoria</h1><p>Acompanhe as respostas, veja como o perfil se conecta à indicação e leve os dados para sua planilha.</p></div><div class="admin-actions"><button class="button button-primary button-small" type="button" data-action="export-csv" ${records.length ? "" : "disabled"}>Baixar respostas CSV <span aria-hidden="true">↓</span></button><button class="button button-outline button-small" type="button" data-action="start-quiz">Nova resposta</button></div></header>
+  content.innerHTML = `${groupSettingsPanel}<header class="admin-header"><div><p class="eyebrow">VISÃO DO TESTE PILOTO</p><h1 id="admin-title" tabindex="-1">Painel da curadoria</h1><p>Acompanhe as respostas, veja como o perfil se conecta à indicação e leve os dados para sua planilha.</p></div><div class="admin-actions"><button class="button button-primary button-small" type="button" data-action="export-csv" ${records.length ? "" : "disabled"}>Baixar respostas CSV <span aria-hidden="true">↓</span></button><button class="button button-outline button-small" type="button" data-action="start-quiz">Nova resposta</button></div></header>
     <section class="admin-metrics" aria-label="Resumo do piloto"><div class="metric"><span>Questionários concluídos</span><strong>${records.length}</strong></div><div class="metric"><span>Perfil mais frequente</span><strong style="font-size:${mostCommonCount ? "25px" : "21px"}">${mostCommonCount ? escapeHTML(mostCommon.name) : "Aguardando"}</strong></div><div class="metric"><span>Indicações geradas</span><strong>${records.filter((record) => Boolean(record.recommendation)).length}</strong></div></section>
     <div class="admin-columns"><section class="admin-panel-block"><h2>Perfis mapeados</h2>${records.length ? `<div class="distribution">${PROFILES.map((profile) => `<div class="distribution-row"><span>${escapeHTML(profile.name)}</span><div class="distribution-track"><div class="distribution-fill" style="width:${records.length ? (distribution[profile.key] / records.length) * 100 : 0}%"></div></div><span class="distribution-value">${distribution[profile.key]}</span></div>`).join("")}</div>` : `<div class="empty-state"><strong>O primeiro mapa abre o caminho</strong>Quando alguém concluir o questionário, o resumo por perfil aparece aqui.</div>`}<aside class="pilot-note">O resultado é uma hipótese exploratória. Use as respostas e os comentários para ajustar as perguntas e os critérios de curadoria.</aside></section>
     <section class="admin-panel-block"><h2>Respostas recentes <span style="color:var(--muted);font:400 11px var(--font-body)">(${records.length})</span></h2>${records.length ? `<div class="records-wrap"><table class="records-table"><thead><tr><th>PARTICIPANTE</th><th>PERFIL</th><th>INDICAÇÃO</th><th>DATA</th><th></th></tr></thead><tbody>${records.map((record) => { const book = getBook(record.recommendation); return `<tr><td><button class="record-name" type="button" data-action="open-record" data-id="${escapeHTML(record.id)}">Leitor ${escapeHTML(record.id.slice(0, 6).toUpperCase())}</button></td><td><span class="record-profile">${escapeHTML(recordProfileLabel(record))}</span></td><td>${escapeHTML(book?.title || "Curadoria manual")}</td><td>${escapeHTML(formatDate(record.createdAt))}</td><td><button class="delete-record" type="button" data-action="delete-record" data-id="${escapeHTML(record.id)}" aria-label="Apagar resposta" title="Apagar resposta">×</button></td></tr>`; }).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Nenhuma resposta por enquanto</strong>Comece pelo questionário para ver como o relatório de cada leitor aparece neste painel.</div>`}</section>
@@ -672,9 +802,42 @@ document.addEventListener("click", (event) => {
   if (!actionTarget) return;
   const action = actionTarget.dataset.action;
   if (action === "start-quiz") startQuiz();
+  else if (action === "refresh-payment-status") {
+    refreshAccountData().then(() => announce("Status do pagamento atualizado."));
+  } else if (action === "copy-pix-key") {
+    const copyPromise = navigator.clipboard?.writeText(PAYMENT_PIX_KEY);
+    if (copyPromise) copyPromise.then(() => announce("Chave Pix copiada."), () => announce("Não foi possível copiar a chave Pix. Selecione e copie o texto."));
+    else announce("Selecione a chave Pix para copiá-la.");
+  }
   else if (action === "open-account") switchView("account");
   else if (action === "open-signup") { state.account.mode = "signup"; switchView("account"); }
-  else if (action === "account-mode") { state.account.mode = actionTarget.dataset.mode; state.account.message = ""; renderAccount(); }
+  else if (action === "account-mode") { state.account.mode = actionTarget.dataset.mode; state.account.message = ""; if (state.account.mode === "signup") state.account.pendingEmail = ""; renderAccount(); }
+  else if (action === "resend-confirmation") {
+    if (TURNSTILE_SITE_KEY && !state.account.captchaToken) {
+      state.account.message = "Conclua a verificação de segurança antes de reenviar.";
+      $(".account-confirmation-message", $("#account-content"))?.replaceChildren(document.createTextNode(state.account.message));
+      announce(state.account.message);
+      return;
+    }
+    const email = state.account.pendingEmail;
+    if (!email || state.account.resendingConfirmation) return;
+    const captchaToken = state.account.captchaToken;
+    state.account.resendingConfirmation = true;
+    actionTarget.disabled = true;
+    actionTarget.textContent = "Enviando…";
+    state.account.message = "Enviando outro link de confirmação…";
+    $(".account-confirmation-message", $("#account-content"))?.replaceChildren(document.createTextNode(state.account.message));
+    readingAccounts.resendSignupConfirmation(email, captchaToken)
+      .then(({ error }) => {
+        if (error) throw error;
+        state.account.message = "Se a confirmação ainda estiver pendente, um novo link será enviado.";
+      })
+      .catch(() => { state.account.message = "Não foi possível reenviar agora. Aguarde um pouco e tente novamente."; })
+      .finally(() => {
+        state.account.resendingConfirmation = false;
+        renderAccount();
+      });
+  }
   else if (action === "account-sign-out") readingAccounts.signOut().catch(() => { state.account.message = "Não foi possível sair da conta. Tente novamente."; renderAccount(); });
   else if (action === "account-import-latest") {
     const latestRecord = state.report || getRecords()[0];
@@ -682,7 +845,7 @@ document.addEventListener("click", (event) => {
       saveProfileToAccount(latestRecord).then(() => { state.account.message = "Seu perfil foi salvo nesta conta."; renderAccount(); }).catch(() => { state.account.message = "Não foi possível salvar esse perfil. Tente novamente."; renderAccount(); });
     }
   } else if (action === "account-delete-reading-data") {
-    if (window.confirm("Apagar desta conta seu nome, faixa etária, endereço, perfil de leitura e avaliações? A conta de acesso por e-mail continuará ativa.")) {
+    if (window.confirm("Apagar desta conta seu nome, faixa etária, endereço, perfil de leitura e avaliações? A conta de acesso por e-mail e os comprovantes de pagamento continuarão ativos.")) {
       readingAccounts.deleteReadingData().then(() => {
         state.account.profile = null;
         state.account.contactProfile = null;
@@ -698,6 +861,8 @@ document.addEventListener("click", (event) => {
       contact_profile: state.account.contactProfile,
       reading_profile: state.account.profile,
       book_feedback: state.account.feedback,
+      payment_access_status: state.account.latestPayment?.status || "not_submitted",
+      payment_submitted_at: state.account.latestPayment?.submitted_at || null,
     };
     const file = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
     const objectUrl = URL.createObjectURL(file);
@@ -772,6 +937,78 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const groupSettingsForm = event.target.closest("#admin-group-links-form");
+  if (groupSettingsForm) {
+    event.preventDefault();
+    if (!state.account.isPlatformAdmin || !state.account.user) {
+      state.account.adminMessage = "Esta conta não está autorizada a alterar os convites.";
+      renderAdmin();
+      return;
+    }
+    const formData = new FormData(groupSettingsForm);
+    let settings;
+    try {
+      settings = PROFILES.map((profile) => ({
+        profile_key: profile.key,
+        invite_url: normalizeWhatsAppInvite(formData.get(profile.key)),
+      }));
+    } catch (error) {
+      state.account.adminMessage = error.message;
+      renderAdmin();
+      return;
+    }
+
+    const submitButton = $("button[type=submit]", groupSettingsForm);
+    submitButton.disabled = true;
+    state.account.adminMessage = "Salvando os convites…";
+    $(".admin-group-message", groupSettingsForm)?.replaceChildren(document.createTextNode(state.account.adminMessage));
+    try {
+      state.account.groupSettings = await readingAccounts.saveReaderGroupSettings(settings);
+      state.account.adminMessage = "Convites atualizados. Os relatórios já usarão esses links.";
+      announce(state.account.adminMessage);
+    } catch {
+      state.account.adminMessage = "Não foi possível salvar. Confirme sua conexão e tente novamente.";
+    }
+    renderAdmin();
+    return;
+  }
+
+  const paymentForm = event.target.closest("#payment-proof-form");
+  if (paymentForm) {
+    event.preventDefault();
+    if (!PAYMENT_CONFIGURED || !state.account.user || !readingAccounts.accountsConfigured) {
+      state.account.message = "O pagamento ainda não está configurado para esta plataforma.";
+      $(".account-form-message", $("#account-content"))?.replaceChildren(document.createTextNode(state.account.message));
+      return;
+    }
+    const formData = new FormData(paymentForm);
+    const file = formData.get("receipt");
+    if (!formData.get("receiptConsent")) {
+      state.account.message = "Confirme o uso privado do comprovante para enviá-lo.";
+      $(".account-form-message", $("#account-content"))?.replaceChildren(document.createTextNode(state.account.message));
+      return;
+    }
+    const submitButton = $("button[type=submit]", paymentForm);
+    submitButton.disabled = true;
+    state.account.message = "Enviando seu comprovante com segurança…";
+    $(".account-form-message", $("#account-content"))?.replaceChildren(document.createTextNode(state.account.message));
+    try {
+      await readingAccounts.submitPaymentProof({ userId: state.account.user.id, file });
+      await refreshAccountData();
+      state.account.message = "Comprovante recebido. O acesso será liberado após a revisão manual.";
+      announce(state.account.message);
+    } catch (error) {
+      const detail = String(error?.message || "").toLowerCase();
+      state.account.message = detail.includes("5 mb")
+        ? "O arquivo ultrapassa o limite de 5 MB. Escolha um arquivo menor."
+        : detail.includes("formato")
+          ? "Use um arquivo PDF, JPG, PNG ou WebP."
+          : "Não foi possível enviar o comprovante. Confira o arquivo e tente novamente.";
+    }
+    renderAccount();
+    return;
+  }
+
   const authForm = event.target.closest("#account-auth-form");
   if (authForm) {
     event.preventDefault();
@@ -793,11 +1030,14 @@ document.addEventListener("submit", async (event) => {
         const { data, error } = await readingAccounts.createAccount({ displayName: String(formData.get("displayName") || "").trim(), email, password, captchaToken });
         if (error) throw error;
         if (data.session?.user) {
+          state.account.pendingEmail = "";
           handleAuthChange(data.session.user);
           state.account.message = "Conta criada. Confirme seus dados de perfil e depois faça seu mapa de leitura.";
           if (state.report) await saveProfileToAccount(state.report);
         } else {
-          state.account.message = "Conta criada. Confirme seu e-mail pelo link enviado e entre para completar o perfil.";
+          state.account.pendingEmail = email;
+          state.account.mode = "awaiting-confirmation";
+          state.account.message = "";
         }
       } else if (mode === "reset") {
         const { error } = await readingAccounts.sendPasswordReset(email, captchaToken);

@@ -6,6 +6,15 @@
   max-width: 1050px;
   margin: 74px auto 54px;
 }
+.account-confirmation-layout { display: grid; grid-template-columns: minmax(0,1fr) minmax(320px,430px); align-items: center; gap: clamp(38px,7vw,92px); max-width: 1050px; margin: 74px auto 72px; }
+.account-confirmation-card { min-width: 0; padding: 28px 30px; border-top: 3px solid var(--green); background: var(--white); }
+.confirmation-mark { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 17px; border-radius: 50%; color: var(--green); background: #edf2ee; font-size: 20px; }
+.account-confirmation-card h2 { margin: 0 0 11px; font-family: var(--font-display); font-size: 25px; font-weight: 400; }
+.account-confirmation-card > p:not(.account-form-message) { margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.75; overflow-wrap: anywhere; }
+.account-confirmation-card strong { color: var(--ink); }
+.account-confirmation-message { margin-top: 14px; }
+.account-confirmation-actions { display: grid; justify-items: start; gap: 11px; margin-top: 14px; }
+.account-confirmation-actions .text-button { color: var(--rose-dark); font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
 .account-intro { max-width: 650px; }
 .account-intro h1 { max-width: 620px; margin: 9px 0 17px; font-size: clamp(39px, 5vw, 62px); line-height: 1.08; }
 .account-intro > p:last-child { max-width: 540px; color: var(--muted); font-size: 14px; line-height: 1.85; }
@@ -30,6 +39,39 @@
 .account-privacy-details { padding: 10px 12px; border: 1px solid var(--line); color: var(--muted); background: #faf8f6; font-size: 10px; line-height: 1.7; }
 .account-privacy-details summary { color: var(--rose-dark); cursor: pointer; font-weight: 600; }
 .account-privacy-details p { margin: 8px 0 0; }
+.account-access-panel { display: grid; grid-template-columns: minmax(0,.88fr) minmax(300px,1.12fr); gap: 25px; max-width: 1160px; margin: 24px auto 28px; padding: 23px 25px; border-left: 3px solid var(--gold); background: #f4f1e8; }
+.account-access-copy h2, .reader-group-heading h2 { margin: 5px 0 9px; font-family: var(--font-display); font-size: 29px; font-weight: 400; line-height: 1.2; }
+.account-access-copy > p:not(.eyebrow), .reader-group-heading > p:not(.eyebrow) { max-width: 520px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
+.account-payment-status, .account-payment-instructions { min-width: 0; padding: 16px 18px; background: var(--white); }
+.account-payment-status { align-self: start; border-top: 2px solid var(--green); }
+.account-payment-status strong { color: var(--ink); font-size: 12px; }
+.account-payment-status p { margin: 7px 0 12px; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.account-payment-instructions { border-top: 2px solid var(--rose); }
+.account-payment-instructions > .eyebrow { margin-bottom: 8px; }
+.account-payment-instructions dl { display: grid; gap: 7px; margin: 0 0 14px; }
+.account-payment-instructions dl > div { display: grid; grid-template-columns: 95px minmax(0,1fr); gap: 10px; font-size: 10px; }
+.account-payment-instructions dt { color: var(--muted); }
+.account-payment-instructions dd { margin: 0; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.account-pix-key { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px 12px; align-items: center; padding: 11px 12px; background: #f7f5f2; }
+.account-pix-key > span { grid-column: 1 / -1; color: var(--muted); font-size: 9px; }
+.account-pix-key code { min-width: 0; color: var(--ink); font-size: 10px; overflow-wrap: anywhere; }
+.account-pix-key .text-button { color: var(--rose-dark); font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
+.account-payment-form { display: grid; gap: 12px; margin-top: 14px; }
+.account-payment-form > label:not(.account-consent) { display: grid; gap: 7px; color: var(--ink); font-size: 10px; font-weight: 600; }
+.account-payment-form > label > span { color: var(--muted); font-size: 9px; font-weight: 400; }
+.account-payment-form input[type="file"] { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); color: var(--muted); background: white; font-size: 10px; }
+.account-payment-form input[type="file"]:focus { outline: 2px solid rgba(168,62,105,.38); outline-offset: 1px; }
+.account-payment-form .button { width: 100%; }
+.account-payment-date { margin-top: 10px !important; font-size: 9px !important; }
+.reader-group-section { max-width: 1050px; margin: 0 auto 40px; padding: 22px 0 25px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.reader-group-heading { margin-bottom: 14px; }
+.reader-group-heading h2 { font-size: 26px; }
+.reader-group-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.reader-group-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; padding: 13px 14px; border-left: 2px solid var(--green); background: #f2f4ef; }
+.reader-group-card .eyebrow { margin: 0 0 3px; font-size: 8px; }
+.reader-group-card h3 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 400; }
+.reader-group-card p:not(.eyebrow) { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.reader-group-soon { flex: 0 0 auto; color: var(--muted); font-size: 9px; }
 .account-welcome { display: flex; align-items: start; justify-content: space-between; gap: 24px; max-width: 1160px; margin: 48px auto 17px; }
 .account-welcome h1 { font-size: clamp(36px, 4.5vw, 54px); }
 .account-welcome .button { flex: 0 0 auto; }
@@ -90,9 +132,26 @@
 .account-setup-note code { flex: 0 0 auto; padding: 10px 12px; color: var(--rose-dark); background: var(--white); font-size: 10px; line-height: 1.8; }
 .account-loading { max-width: 1160px; min-height: 260px; margin: 55px auto; color: var(--muted); font-family: var(--font-display); font-size: 23px; }
 
+.group-settings-panel { max-width: 1100px; margin: 42px auto 34px; padding: clamp(20px, 4vw, 34px); border: 1px solid var(--line); background: var(--white); }
+.group-settings-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+.group-settings-heading .eyebrow { margin-bottom: 7px; }
+.group-settings-heading h2 { margin: 0; font-family: var(--font-display); font-size: clamp(26px, 3.5vw, 36px); font-weight: 400; }
+.group-settings-heading p:not(.eyebrow) { max-width: 600px; margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.admin-access-badge { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #cfd9d1; color: #365b47; background: #f0f5f0; font-size: 9px; font-weight: 700; }
+.group-settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 15px; }
+.group-settings-fields label { display: grid; gap: 7px; min-width: 0; color: var(--ink); font-size: 11px; font-weight: 600; }
+.group-settings-fields input { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); color: var(--ink); background: #fff; font: 400 11px var(--font-body); }
+.group-settings-fields input:focus { outline: 2px solid rgba(168,62,105,.36); outline-offset: 1px; }
+.group-settings-fields small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.group-settings-submit { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 19px; padding-top: 15px; border-top: 1px solid var(--line); }
+.admin-group-message { min-height: 17px; margin: 0; color: var(--green); font-size: 10px; }
+.group-settings-submit .button { flex: 0 0 auto; }
+
 @media (max-width: 900px) {
   .account-auth-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 390px); gap: 30px; margin-top: 56px; }
+  .account-confirmation-layout { grid-template-columns: minmax(0,1fr) minmax(280px,390px); gap: 30px; margin-top: 56px; }
   .account-dashboard { grid-template-columns: 1fr; gap: 28px; }
+  .account-access-panel { grid-template-columns: minmax(0,1fr); gap: 16px; margin: 21px auto 25px; }
   .account-preferences { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items: start; gap: 14px; }
   .account-profile-card, .account-preferences-form { margin: 0; }
   .account-data-actions { align-self: center; margin: 0; }
@@ -100,6 +159,8 @@
 
 @media (max-width: 650px) {
   .account-auth-layout { grid-template-columns: minmax(0,1fr); gap: 24px; margin: 40px auto 30px; }
+  .account-confirmation-layout { grid-template-columns: minmax(0,1fr); gap: 20px; margin: 40px auto 35px; }
+  .account-confirmation-card { padding: 22px 19px; }
   .account-intro h1 { font-size: clamp(36px, 11vw, 48px); }
   .account-intro > p:last-child { font-size: 12px; }
   .account-auth-note { margin-top: 22px; }
@@ -126,7 +187,18 @@
   .account-empty h2 { font-size: 26px; }
   .account-empty-actions { flex-direction: column; }
   .account-empty-actions .button { width: 100%; }
+  .account-access-panel { padding: 18px 16px; }
+  .account-access-copy h2 { font-size: 25px; }
+  .account-payment-status, .account-payment-instructions { padding: 14px; }
+  .reader-group-section { margin-bottom: 31px; padding: 18px 0 20px; }
+  .reader-group-list { grid-template-columns: minmax(0,1fr); }
+  .reader-group-card { align-items: start; flex-direction: column; gap: 9px; }
   .account-setup-note { flex-direction: column; gap: 14px; margin: 24px auto 55px; padding: 18px; }
   .account-setup-note code { max-width: 100%; overflow-wrap: anywhere; }
   .account-loading { min-height: 180px; margin: 35px auto; font-size: 20px; }
+  .group-settings-panel { margin: 28px auto 23px; padding: 19px 15px; }
+  .group-settings-heading { flex-direction: column; gap: 12px; }
+  .group-settings-fields { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .group-settings-submit { align-items: stretch; flex-direction: column; }
+  .group-settings-submit .button { width: 100%; }
 }
